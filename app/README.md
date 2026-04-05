@@ -1,73 +1,54 @@
-# React + TypeScript + Vite
+# Treewalk Academy (Prototype)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This directory contains a production-minded prototype for Treewalk Academy:
 
-Currently, two official plugins are available:
+- Invite-only CPD-first LMS experience for accountants
+- Strict course completion logic (100% watch + quiz >= 80%)
+- Quarter-hour CPD calculation
+- 3-year transcript view + certificate references
+- Learner and admin mode flows
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Stack
 
-## React Compiler
+- React + TypeScript + Vite
+- In-memory app state to simulate Supabase-backed workflows
+- Vitest for business-logic unit tests
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Scripts
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev
+npm run lint
+npm run build
+npm run test
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Functional Notes
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### Completion Logic
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+A course is marked complete only when both are true:
+
+1. Learner has watched 100% of segments (no-skip progression enforced)
+2. Learner has a passing quiz score (>= 80%)
+
+Retakes are unlimited. The most recent passing attempt is treated as the active pass.
+
+### CPD
+
+`cpd_hours = round(video_minutes / 60, nearest 0.25)`
+
+### Roles
+
+- learner
+- instructor
+- content_admin
+- hr_admin
+- super_admin
+
+### Admin Workflow
+
+`draft -> review -> published`
+
+Role-based transition rules are enforced in the app store.
