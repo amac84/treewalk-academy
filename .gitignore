@@ -17,6 +17,9 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Cursor — project rules are machine/local; not shared via this repo
+.cursor/rules/
+
 # Logs
 *.log
 npm-debug.log*
