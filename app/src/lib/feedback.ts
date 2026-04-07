@@ -28,6 +28,23 @@ function feedbackEndpointUsesDefaultUrl(endpoint: string): boolean {
   return endpoint === DEFAULT_FUNCTION_PATH || !/^https?:\/\//i.test(endpoint.trim())
 }
 
+/** Strip trailing slash so POST is not redirected (some stacks turn that into GET → 405). */
+function normalizeFeedbackEndpoint(url: string): string {
+  const t = url.trim()
+  if (!t) {
+    return DEFAULT_FUNCTION_PATH
+  }
+  return t.replace(/\/+$/, '') || t
+}
+
+function resolveFeedbackEndpoint(): string {
+  const raw = (import.meta.env.VITE_FEEDBACK_FUNCTION_URL as string | undefined)?.trim()
+  if (!raw) {
+    return DEFAULT_FUNCTION_PATH
+  }
+  return normalizeFeedbackEndpoint(raw)
+}
+
 /** Supabase’s gateway expects the anon (publishable) key on function calls from the browser. */
 function supabaseInvokeHeaders(): Record<string, string> {
   const key = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim()
@@ -37,11 +54,38 @@ function supabaseInvokeHeaders(): Record<string, string> {
   return {
     apikey: key,
     Authorization: `Bearer ${key}`,
+    'X-Client-Info': 'treewalk-academy-feedback',
   }
 }
 
 export async function submitFeedback(payload: FeedbackSubmission): Promise<FeedbackResponse> {
-  const endpoint = (import.meta.env.VITE_FEEDBACK_FUNCTION_URL as string | undefined) ?? DEFAULT_FUNCTION_PATH
+  const endpoint = resolveFeedbackEndpoint()
+
+  if (typeof window !== 'undefined' && feedbackEndpointUsesDefaultUrl(endpoint)) {
+    return {
+      success: false,
+      error: import.meta.env.PROD
+        ? 'Feedback URL is missing in this build. In Cloudflare Pages → Settings → Environment variables, set VITE_FEEDBACK_FUNCTION_URL to the full https://…supabase.co/functions/v1/create-linear-ticket URL (Production and Preview if needed), plus VITE_SUPABASE_ANON_KEY, then redeploy. Vite only reads these at build time.'
+        : 'Set VITE_FEEDBACK_FUNCTION_URL in app/.env to your full Supabase function URL (see .env.example). Relative /functions/… only works if something proxies to Supabase.',
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      if (new URL(endpoint).origin === window.location.origin) {
+        return {
+          success: false,
+          error:
+            'VITE_FEEDBACK_FUNCTION_URL points at this same website, not Supabase. Use the URL from Supabase Dashboard → Edge Functions → create-linear-ticket (copy).',
+        }
+      }
+    } catch {
+      return {
+        success: false,
+        error: 'VITE_FEEDBACK_FUNCTION_URL is not a valid URL. Copy the function URL from the Supabase dashboard.',
+      }
+    }
+  }
 
   const trimmedMessage = payload.message.trim()
   const hasImage = Boolean(payload.image && payload.image.size > 0)

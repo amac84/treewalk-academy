@@ -376,6 +376,10 @@ deno_version = 2
 [functions.mux]
 verify_jwt = false
 
+# Anonymous browser feedback → Linear; no user JWT (anon key still required by API gateway).
+[functions.create-linear-ticket]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
