@@ -12,9 +12,22 @@ Set these via Supabase secrets (not in frontend env files):
 
 ## Deploy
 
+You need the [Supabase CLI](https://supabase.com/docs/guides/cli). If `supabase` is not installed globally (common on Windows), use **`npx`** from the **repository root** (folder that contains `supabase/`):
+
+1. One-time login: `npx supabase@latest login` (opens the browser).
+2. One-time link this repo to your hosted project:  
+   `npx supabase@latest link --project-ref <your-project-ref>`  
+   (`<your-project-ref>` is the subdomain in `https://<ref>.supabase.co`.)
+3. Deploy with **anonymous browser access** (no user JWT on the function):  
+   `npx supabase@latest functions deploy create-linear-ticket --no-verify-jwt`
+
+Or from repo root:
+
 ```bash
-supabase functions deploy create-linear-ticket
+npm run deploy:function:feedback
 ```
+
+If you omit `--no-verify-jwt`, browser `fetch` without a logged-in Supabase session will get **401** from the gateway.
 
 ## Local test example
 
