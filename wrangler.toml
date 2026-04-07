@@ -1,0 +1,7 @@
+# Cloudflare Pages — required for Git URL / Wrangler-based setup.
+# Keep `name` in sync with your Pages project name in the dashboard.
+# Build: set root directory to `app`, build command `npm run build` (see Cloudflare project settings).
+
+name = "treewalk-academy"
+compatibility_date = "2026-04-01"
+pages_build_output_dir = "./app/dist"

@@ -9,6 +9,7 @@
   --accent: #1ed760;
   --danger: #f3727f;
   --warning: #ffa42b;
+  --feedback-outline: #f3d447;
   --border-soft: #2b2b2b;
   --border-mid: #3b3b3b;
   --radius-sm: 6px;
@@ -24,6 +25,91 @@ body {
 
 #root {
   min-height: 100vh;
+  padding-bottom: 118px;
+}
+
+.feedback-bar-shell {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  padding: 10px 18px calc(10px + env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, rgba(18, 18, 18, 0) 0%, rgba(18, 18, 18, 0.92) 36%);
+}
+
+.feedback-bar {
+  width: min(980px, 100%);
+  margin: 0 auto;
+  background: rgba(14, 14, 14, 0.94);
+  border: 1px solid var(--border-mid);
+  box-shadow: var(--shadow-elevated);
+  border-radius: 18px;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.feedback-bar-input-wrap {
+  flex: 1;
+  display: grid;
+  gap: 4px;
+}
+
+.feedback-bar-prompt {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.1px;
+  color: var(--text-muted);
+  padding-left: 6px;
+}
+
+.feedback-bar input {
+  border-radius: 12px;
+  border: 1px solid var(--feedback-outline);
+  background: #181818;
+  min-height: 44px;
+}
+
+.feedback-bar input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(243, 212, 71, 0.25);
+}
+
+.feedback-submit {
+  min-width: 44px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--feedback-outline);
+  color: #181818;
+  border: 0;
+}
+
+.feedback-submit svg {
+  width: 22px;
+  height: 22px;
+}
+
+.feedback-bar-status {
+  margin: 8px auto 0;
+  width: min(980px, 100%);
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 0 6px;
+}
+
+.feedback-bar-status--success {
+  color: #5ef08e;
+}
+
+.feedback-bar-status--error {
+  color: var(--danger);
 }
 
 .app-shell {
@@ -613,6 +699,34 @@ th {
 }
 
 @media (max-width: 640px) {
+  #root {
+    padding-bottom: 146px;
+  }
+
+  .feedback-bar-shell {
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  }
+
+  .feedback-bar {
+    border-radius: 14px;
+    padding: 6px;
+    gap: 8px;
+  }
+
+  .feedback-bar-prompt {
+    display: none;
+  }
+
+  .feedback-bar input {
+    min-height: 40px;
+  }
+
+  .feedback-submit {
+    min-width: 40px;
+    width: 40px;
+    height: 40px;
+  }
+
   .filters {
     grid-template-columns: 1fr;
   }

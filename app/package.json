@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run --coverage",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "db:push": "node ../scripts/push-supabase-migrations.mjs"
   },
   "dependencies": {
     "react": "^19.2.4",
