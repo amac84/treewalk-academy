@@ -1,6 +1,12 @@
-# Cloudflare Pages — required for Git URL / Wrangler-based setup.
-# Keep `name` in sync with your Pages project name in the dashboard.
-# Build: set root directory to `app`, build command `npm run build` (see Cloudflare project settings).
+# Cloudflare Pages — used by `npx wrangler pages deploy` (e.g. CI).
+#
+# `name` MUST match the Pages project slug exactly (Workers & Pages → your project → name in URL).
+# Error 8000007 "Project not found" means: no project with this name on the account your API token
+# uses — create a Pages project with this name, OR change `name` to match an existing project.
+# If the project lives under another account, fix the token / CLOUDFLARE_ACCOUNT_ID for CI.
+#
+# Build in Cloudflare: root directory `app`, build command `npm run build` (or use repo root
+# package.json which runs the app build).
 
 name = "treewalk-academy"
 compatibility_date = "2026-04-01"
