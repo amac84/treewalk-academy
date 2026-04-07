@@ -28,6 +28,18 @@ function feedbackEndpointUsesDefaultUrl(endpoint: string): boolean {
   return endpoint === DEFAULT_FUNCTION_PATH || !/^https?:\/\//i.test(endpoint.trim())
 }
 
+/** Supabase’s gateway expects the anon (publishable) key on function calls from the browser. */
+function supabaseInvokeHeaders(): Record<string, string> {
+  const key = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim()
+  if (!key) {
+    return {}
+  }
+  return {
+    apikey: key,
+    Authorization: `Bearer ${key}`,
+  }
+}
+
 export async function submitFeedback(payload: FeedbackSubmission): Promise<FeedbackResponse> {
   const endpoint = (import.meta.env.VITE_FEEDBACK_FUNCTION_URL as string | undefined) ?? DEFAULT_FUNCTION_PATH
 
@@ -43,6 +55,7 @@ export async function submitFeedback(payload: FeedbackSubmission): Promise<Feedb
       form.append('image', payload.image, payload.image.name || 'screenshot.png')
       response = await fetch(endpoint, {
         method: 'POST',
+        headers: supabaseInvokeHeaders(),
         body: form,
       })
     } else {
@@ -50,6 +63,7 @@ export async function submitFeedback(payload: FeedbackSubmission): Promise<Feedb
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...supabaseInvokeHeaders(),
         },
         body: JSON.stringify({
           message: trimmedMessage,
@@ -91,6 +105,30 @@ export async function submitFeedback(payload: FeedbackSubmission): Promise<Feedb
         success: false,
         error:
           'Feedback was rejected (unauthorized). Deploy the Edge Function with public access for anonymous reports, or fix Supabase JWT settings.',
+      }
+    }
+
+    if (response.status === 405) {
+      const host = (() => {
+        try {
+          return new URL(endpoint).hostname
+        } catch {
+          return ''
+        }
+      })()
+      const needsSupabaseHeaders = host.endsWith('.supabase.co')
+      const hasAnon = Boolean((import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim())
+      if (needsSupabaseHeaders && !hasAnon) {
+        return {
+          success: false,
+          error:
+            'Supabase rejected the request (405). Add VITE_SUPABASE_ANON_KEY (same publishable/anon key as the rest of the app) to Cloudflare Pages environment variables and rebuild.',
+        }
+      }
+      return {
+        success: false,
+        error:
+          'Server refused POST (405). Confirm VITE_FEEDBACK_FUNCTION_URL is the full Supabase function URL (Dashboard → Edge Functions → copy). If it is, verify the function name and that the latest deploy finished.',
       }
     }
 
