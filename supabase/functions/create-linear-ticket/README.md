@@ -23,3 +23,14 @@ curl -i -X POST "http://127.0.0.1:54321/functions/v1/create-linear-ticket" \
   -H "Content-Type: application/json" \
   -d "{\"message\":\"Quiz page crashes on submit\",\"route\":\"/courses/intro/quiz\"}"
 ```
+
+### With screenshot (multipart)
+
+```bash
+curl -i -X POST "http://127.0.0.1:54321/functions/v1/create-linear-ticket" \
+  -F "message=Button overlaps on mobile" \
+  -F "route=/courses/intro" \
+  -F "image=@./screenshot.png;type=image/png"
+```
+
+Images are uploaded to Linear storage via `fileUpload`, then embedded in the issue description. Max size **5MB**; types **PNG, JPEG, WebP, GIF**.
