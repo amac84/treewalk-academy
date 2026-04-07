@@ -1,4 +1,5 @@
 import { Link, NavLink, Outlet } from 'react-router-dom'
+import { CourseSyncBanner } from '../common/CourseSyncBanner'
 
 const links = [
   { label: 'Overview', to: '/admin' },
@@ -29,6 +30,7 @@ export function AdminLayout() {
       </aside>
 
       <div className="main-column">
+        <CourseSyncBanner />
         <main className="page-content">
           <Outlet />
         </main>

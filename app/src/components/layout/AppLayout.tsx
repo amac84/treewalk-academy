@@ -1,4 +1,5 @@
 import { Link, NavLink, Outlet } from 'react-router-dom'
+import { CourseSyncBanner } from '../common/CourseSyncBanner'
 import { useCurrentUser, useRoleLabel } from '../../hooks/useAppStore'
 
 const learnerNav = [
@@ -56,6 +57,7 @@ export function AppLayout() {
         </div>
       </aside>
       <div className="main-column">
+        <CourseSyncBanner />
         <main className="page-content">
           <Outlet />
         </main>

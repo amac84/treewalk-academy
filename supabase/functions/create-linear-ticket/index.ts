@@ -8,6 +8,10 @@ const MAX_MESSAGE_LENGTH = 500
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const ALLOWED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif'])
 
+/** Reject markdown/HTML-style destinations that are commonly abused in issue bodies. */
+const DANGEROUS_MARKDOWN_LINK = /\]\(\s*(javascript|data|vbscript):/i
+const RISKY_HTML_TAG = /<\s*\/?\s*(script|iframe|object|embed|link|meta|style)\b/i
+
 type CreateLinearIssueResult = {
   id: string
   identifier: string
@@ -47,6 +51,8 @@ Deno.serve(async (request) => {
   }
 
   const { message: rawMessage, route, image } = parsed
+  const safeRoute = sanitizeRoute(route)
+
   let message = rawMessage.trim()
   if (!message && image) {
     message = '(Screenshot attached; no written description.)'
@@ -54,14 +60,30 @@ Deno.serve(async (request) => {
   if (!message) {
     return jsonResponse({ success: false, error: 'Message or screenshot is required.' }, 400)
   }
+
+  const textCheck = sanitizeFeedbackText(message)
+  if (!textCheck.ok) {
+    return jsonResponse({ success: false, error: textCheck.error }, 400)
+  }
+  message = textCheck.text
+
   if (message.length > MAX_MESSAGE_LENGTH) {
     return jsonResponse({ success: false, error: 'Message is too long.' }, 400)
   }
 
+  let imagePayload = image
+  if (imagePayload) {
+    const magic = validateImageMagicBytes(imagePayload.bytes, imagePayload.contentType)
+    if (!magic.ok) {
+      return jsonResponse({ success: false, error: magic.error }, 400)
+    }
+    imagePayload = { ...imagePayload, contentType: magic.contentType }
+  }
+
   let screenshotMarkdown = ''
-  if (image) {
+  if (imagePayload) {
     try {
-      const assetUrl = await uploadImageToLinear(linearApiKey, image)
+      const assetUrl = await uploadImageToLinear(linearApiKey, imagePayload)
       screenshotMarkdown = `\n\n## Screenshot\n\n![Screenshot](${assetUrl})\n`
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Image upload failed.'
@@ -70,7 +92,7 @@ Deno.serve(async (request) => {
   }
 
   const title = buildIssueTitle(message)
-  const description = buildIssueDescription({ message, route }) + screenshotMarkdown
+  const description = buildIssueDescription({ message, route: safeRoute }) + screenshotMarkdown
 
   const mutation = `
     mutation IssueCreate($input: IssueCreateInput!) {
@@ -140,19 +162,28 @@ async function parseFeedbackRequest(request: Request): Promise<ParsedBody | { er
     if (file.size > MAX_IMAGE_BYTES) {
       return { error: 'Image is too large (max 5MB).' }
     }
-    const contentTypeFile = (file.type || 'application/octet-stream').toLowerCase()
-    if (!ALLOWED_IMAGE_TYPES.has(contentTypeFile)) {
-      return { error: 'Only PNG, JPEG, WebP, or GIF images are allowed.' }
-    }
     const bytes = new Uint8Array(await file.arrayBuffer())
     if (bytes.byteLength > MAX_IMAGE_BYTES) {
       return { error: 'Image is too large (max 5MB).' }
+    }
+    const rawDeclared = (file.type || '').toLowerCase()
+    const declaredNorm = rawDeclared === 'image/jpg' ? 'image/jpeg' : rawDeclared
+    if (
+      declaredNorm &&
+      declaredNorm !== 'application/octet-stream' &&
+      !ALLOWED_IMAGE_TYPES.has(declaredNorm)
+    ) {
+      return { error: 'Only PNG, JPEG, WebP, or GIF images are allowed.' }
     }
     const filename = sanitizeFilename(file.name || 'screenshot.png')
     return {
       message,
       route: route || 'unknown-route',
-      image: { bytes, filename, contentType: contentTypeFile === 'image/jpg' ? 'image/jpeg' : contentTypeFile },
+      image: {
+        bytes,
+        filename,
+        contentType: declaredNorm || 'application/octet-stream',
+      },
     }
   }
 
@@ -165,6 +196,94 @@ async function parseFeedbackRequest(request: Request): Promise<ParsedBody | { er
 function sanitizeFilename(name: string): string {
   const base = name.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 120)
   return base || 'screenshot.png'
+}
+
+/** Limit route to a safe path-shaped string so it cannot break markdown or inject backticks. */
+function sanitizeRoute(route: string): string {
+  const t = route.trim().slice(0, 256)
+  if (!t.startsWith('/')) {
+    return 'unknown-route'
+  }
+  if (!/^[/a-zA-Z0-9._~?#%&+=\-]+$/.test(t)) {
+    return 'unknown-route'
+  }
+  return t
+}
+
+function sanitizeFeedbackText(raw: string): { ok: true; text: string } | { ok: false; error: string } {
+  let s = raw.replace(/\0/g, '')
+  s = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+  s = s.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  s = s.replace(/\n{8,}/g, '\n\n\n\n\n\n\n')
+  s = s.trim()
+  if (DANGEROUS_MARKDOWN_LINK.test(s)) {
+    return { ok: false, error: 'Message contains disallowed link patterns.' }
+  }
+  if (RISKY_HTML_TAG.test(s)) {
+    return { ok: false, error: 'Disallowed HTML-like content in the message.' }
+  }
+  return { ok: true, text: s }
+}
+
+function inferImageTypeFromMagic(bytes: Uint8Array): string | null {
+  if (bytes.length < 12) {
+    return null
+  }
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+    return 'image/png'
+  }
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return 'image/jpeg'
+  }
+  if (
+    bytes[0] === 0x47 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x38 &&
+    (bytes[4] === 0x37 || bytes[4] === 0x39) &&
+    bytes[5] === 0x61
+  ) {
+    return 'image/gif'
+  }
+  if (
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return 'image/webp'
+  }
+  return null
+}
+
+function validateImageMagicBytes(
+  bytes: Uint8Array,
+  declaredContentType: string,
+): { ok: true; contentType: string } | { ok: false; error: string } {
+  const inferred = inferImageTypeFromMagic(bytes)
+  if (!inferred) {
+    return { ok: false, error: 'File is not a valid PNG, JPEG, GIF, or WebP image.' }
+  }
+  const declared = (declaredContentType === 'image/jpg' ? 'image/jpeg' : declaredContentType).toLowerCase()
+  const unknownDeclared =
+    !declared ||
+    declared === 'application/octet-stream' ||
+    !ALLOWED_IMAGE_TYPES.has(declared)
+  if (unknownDeclared) {
+    return { ok: true, contentType: inferred }
+  }
+  if (declared !== inferred) {
+    return { ok: false, error: 'Image type does not match file contents.' }
+  }
+  return { ok: true, contentType: inferred }
+}
+
+function escapeBackticksForMarkdown(s: string): string {
+  return s.replace(/`/g, "'")
 }
 
 async function uploadImageToLinear(
@@ -261,10 +380,11 @@ function buildIssueTitle(message: string): string {
 }
 
 function buildIssueDescription({ message, route }: { message: string; route: string }): string {
+  const routeSafe = escapeBackticksForMarkdown(route)
   return [
     '## Reported from in-app feedback bar',
     '',
-    `- Route: \`${route}\``,
+    `- Route: \`${routeSafe}\``,
     `- Submitted at: ${new Date().toISOString()}`,
     '',
     '## Bug details',

@@ -1,3 +1,5 @@
+export type CoursesSyncStatus = 'local_only' | 'loading' | 'synced' | 'error'
+
 export type UserRole =
   | 'learner'
   | 'instructor'
@@ -39,11 +41,19 @@ export interface Invite {
   acceptedAt?: string
 }
 
+export type MuxSegmentStatus = 'idle' | 'uploading' | 'processing' | 'ready' | 'error'
+
 export interface CourseSegment {
   id: string
   title: string
   durationMinutes: number
   order: number
+  /** Set after a successful Mux direct upload + processing */
+  muxUploadId?: string
+  muxAssetId?: string
+  muxPlaybackId?: string
+  muxStatus?: MuxSegmentStatus
+  muxErrorMessage?: string
 }
 
 export interface QuizOption {

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { SegmentMuxUpload } from '../../components/admin/SegmentMuxUpload'
 import { COURSE_STATUS_LABELS } from '../../constants'
 import { useAppStore } from '../../hooks/useAppStore'
 import { calculateCPDHours } from '../../lib/cpd'
@@ -80,6 +81,21 @@ export function AdminCoursesPage() {
                       ) : null}
                     </div>
                     <Link to={`/courses/${course.id}`}>Preview learner view</Link>
+                    <details className="mux-course-details stack-sm">
+                      <summary className="mux-details-summary">Mux video (per segment)</summary>
+                      <p className="muted small-copy">
+                        Requires <code>VITE_MUX_FUNCTION_URL</code> and Edge Function secrets. With Supabase
+                        configured, uploads persist for all pilot users. For local mock auth, set{' '}
+                        <code>MUX_ALLOW_UNAUTHENTICATED=true</code> on the function (never in production).
+                      </p>
+                      <div className="mux-segment-list stack-sm">
+                        {[...course.segments]
+                          .sort((a, b) => a.order - b.order)
+                          .map((segment) => (
+                            <SegmentMuxUpload key={segment.id} courseId={course.id} segment={segment} />
+                          ))}
+                      </div>
+                    </details>
                   </article>
                 ))}
               </div>

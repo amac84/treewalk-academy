@@ -29,6 +29,10 @@ body {
   padding-bottom: 96px;
 }
 
+#root:has(.feedback-attachment-preview) {
+  padding-bottom: 148px;
+}
+
 .feedback-bar-shell {
   position: fixed;
   left: 0;
@@ -49,15 +53,109 @@ body {
   border-radius: 18px;
   padding: 8px;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 10px;
 }
 
-.feedback-bar-input-wrap {
+.feedback-bar-body {
   flex: 1;
   min-width: 0;
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feedback-attachment-preview {
+  display: flex;
   align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.feedback-attachment-chip {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border-mid);
+  background: var(--bg-surface-2);
+  flex-shrink: 0;
+}
+
+.feedback-attachment-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.feedback-attachment-skeleton {
+  width: 100%;
+  height: 100%;
+  background: var(--bg-hover);
+  background-image: linear-gradient(
+    100deg,
+    transparent 40%,
+    rgba(255, 255, 255, 0.06) 50%,
+    transparent 60%
+  );
+  background-size: 200% 100%;
+  animation: feedback-attachment-shimmer 1.1s ease-in-out infinite;
+}
+
+@keyframes feedback-attachment-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+.feedback-attachment-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 600;
+}
+
+.feedback-attachment-remove:hover {
+  background: rgba(0, 0, 0, 0.85);
+}
+
+.feedback-attachment-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.feedback-bar-input-wrap {
+  width: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.feedback-bar-trailing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .feedback-bar input {
@@ -593,6 +691,64 @@ button:disabled,
   border-left: 3px solid var(--accent);
 }
 
+.segment.segment-active {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.segment-title-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+
+.segment-title-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.mux-player-frame {
+  width: 100%;
+  padding: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mux-player-frame mux-player {
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  display: block;
+  min-height: 200px;
+}
+
+.mux-course-details {
+  margin-top: 12px;
+}
+
+.mux-details-summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.small-copy {
+  font-size: 0.85rem;
+}
+
+.segment-mux-upload {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.segment-mux-upload:last-child {
+  border-bottom: none;
+}
+
 .quiz-options {
   display: grid;
   gap: 8px;
@@ -756,6 +912,10 @@ th {
     padding-bottom: 120px;
   }
 
+  #root:has(.feedback-attachment-preview) {
+    padding-bottom: 176px;
+  }
+
   .feedback-bar-shell {
     padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
   }
@@ -764,6 +924,17 @@ th {
     border-radius: 14px;
     padding: 6px;
     gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .feedback-bar-trailing {
+    margin-left: auto;
+  }
+
+  .feedback-attachment-chip {
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
   }
 
   .feedback-bar input {
@@ -792,4 +963,49 @@ th {
   .course-row-meta {
     text-align: left;
   }
+}
+
+.sync-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 10px 16px;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.sync-banner code {
+  font-size: 0.8em;
+}
+
+.sync-banner--ok {
+  background: rgba(13, 148, 136, 0.12);
+  color: var(--text-primary);
+}
+
+.sync-banner--muted {
+  background: var(--bg-surface-2);
+  color: var(--text-secondary);
+}
+
+.sync-banner--loading {
+  background: var(--bg-surface-2);
+  color: var(--text-secondary);
+}
+
+.sync-banner--error {
+  background: rgba(220, 38, 38, 0.12);
+  color: var(--text-primary);
+}
+
+.sync-banner-dismiss {
+  margin-left: auto;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-surface-1);
+  cursor: pointer;
 }

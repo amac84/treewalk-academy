@@ -1,3 +1,5 @@
+import MuxPlayer from '@mux/mux-player-react'
+import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useAppStore } from '../../hooks/useAppStore'
 import { getWatchedPercentFromEnrollment } from '../../lib/courseLogic'
@@ -5,6 +7,7 @@ import { getWatchedPercentFromEnrollment } from '../../lib/courseLogic'
 export function CoursePlayerPage() {
   const { courseId = '' } = useParams()
   const { courses, currentUserId, getActiveEnrollment, markSegmentWatched } = useAppStore()
+  const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null)
   const course = courses.find((item) => item.id === courseId)
   const enrollment = getActiveEnrollment(currentUserId, courseId)
 
@@ -24,6 +27,13 @@ export function CoursePlayerPage() {
     sortedSegments.find((segment) => !enrollment.watchedSegmentIds.includes(segment.id))?.id ??
     sortedSegments[sortedSegments.length - 1]?.id
 
+  const activeSegmentId =
+    selectedSegmentId ?? nextSegmentId ?? sortedSegments[0]?.id ?? null
+  const activeSegment = sortedSegments.find((segment) => segment.id === activeSegmentId)
+  const demoPlaybackId = import.meta.env.VITE_MUX_PLAYBACK_ID?.trim() || ''
+  const playbackId = activeSegment?.muxPlaybackId || demoPlaybackId || undefined
+  const muxEnvKey = import.meta.env.VITE_MUX_ENV_KEY?.trim()
+
   return (
     <section className="stack-lg">
       <header className="stack-sm">
@@ -38,12 +48,24 @@ export function CoursePlayerPage() {
         <article className="video-shell">
           <h2>Video player</h2>
           <p className="muted">
-            Simulated Mux player. Segment progression is server-authoritative in production.
+            Mux playback when a segment has a playback ID (or use{' '}
+            <code>VITE_MUX_PLAYBACK_ID</code> for a single demo asset).
           </p>
-          <div className="video-frame">
-            <strong>Currently on:</strong>{' '}
-            {sortedSegments.find((segment) => segment.id === nextSegmentId)?.title ??
-              'Completed'}
+          <div className="video-frame mux-player-frame">
+            {playbackId ? (
+              <MuxPlayer
+                playbackId={playbackId}
+                streamType="on-demand"
+                accentColor="var(--accent, #0d9488)"
+                envKey={muxEnvKey || undefined}
+                metadataVideoTitle={activeSegment?.title ?? course.title}
+              />
+            ) : (
+              <p className="muted">
+                <strong>Currently on:</strong> {activeSegment?.title ?? '—'}. No Mux playback ID for this
+                segment — upload from Admin → Courses or set a demo ID in env.
+              </p>
+            )}
           </div>
         </article>
 
@@ -53,13 +75,35 @@ export function CoursePlayerPage() {
             {sortedSegments.map((segment) => {
               const isWatched = enrollment.watchedSegmentIds.includes(segment.id)
               const isAllowed = isWatched || segment.id === nextSegmentId
+              const isActive = segment.id === activeSegmentId
+              const canSelect = isWatched || isAllowed
 
               return (
-                <li key={segment.id} className={isWatched ? 'segment watched' : 'segment'}>
+                <li
+                  key={segment.id}
+                  className={[
+                    'segment',
+                    isWatched ? 'watched' : '',
+                    isActive ? 'segment-active' : '',
+                    canSelect ? 'segment-selectable' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                >
                   <div>
-                    <strong>{segment.title}</strong>
+                    <button
+                      type="button"
+                      className="segment-title-btn"
+                      disabled={!canSelect}
+                      onClick={() => {
+                        if (canSelect) setSelectedSegmentId(segment.id)
+                      }}
+                    >
+                      <strong>{segment.title}</strong>
+                    </button>
                     <p className="muted">
                       {segment.durationMinutes} mins · {isWatched ? 'Watched' : 'Pending'}
+                      {segment.muxPlaybackId ? ' · Mux' : ''}
                     </p>
                   </div>
                   <button

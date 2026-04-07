@@ -1,14 +1,27 @@
-import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { REQUIRED_PASSING_SCORE } from '../constants'
 import { initialState } from '../data/mockData'
+import { persistCourseToSupabase, loadCoursesFromSupabase } from '../lib/coursePersistence'
 import { calculateCPDHours } from '../lib/cpd'
+import { getSupabaseBrowserClient } from '../lib/supabaseClient'
 import {
   canMarkSegmentWatched,
   evaluateCompletion,
   getLatestPassedAttempt,
   scoreQuizAttempt,
 } from '../lib/courseLogic'
-import type { AppState, CourseStatus, Enrollment, Invite, QuizAttempt, User, UserRole } from '../types'
+import type {
+  AppState,
+  Course,
+  CourseSegment,
+  CoursesSyncStatus,
+  CourseStatus,
+  Enrollment,
+  Invite,
+  QuizAttempt,
+  User,
+  UserRole,
+} from '../types'
 import { AppStoreContext } from './AppStoreContext'
 
 interface ActionResult {
@@ -30,10 +43,23 @@ export interface AppStoreContextValue extends AppState {
   markSegmentWatched: (courseId: string, segmentId: string) => ActionResult
   submitQuizAttempt: (courseId: string, answers: Record<string, string>) => QuizAttempt | null
   transitionCourseStatus: (courseId: string, nextStatus: CourseStatus) => ActionResult
+  updateCourseSegmentMux: (
+    courseId: string,
+    segmentId: string,
+    mux: Partial<
+      Pick<
+        CourseSegment,
+        'muxUploadId' | 'muxAssetId' | 'muxPlaybackId' | 'muxStatus' | 'muxErrorMessage'
+      >
+    >,
+  ) => void
   toggleWebinarAttendance: (webinarId: string) => void
   getCourseReadiness: (courseId: string, userId?: string) => ReturnType<typeof evaluateCompletion>
   getActiveEnrollment: (userId: string, courseId: string) => Enrollment | null
   transcriptForCurrentUser: AppState['transcript']
+  coursesSyncStatus: CoursesSyncStatus
+  coursesSyncMessage: string | null
+  clearCoursesSyncMessage: () => void
 }
 
 const createCode = () =>
@@ -70,6 +96,39 @@ const canTransitionCourseStatus = (
 export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
   const [state, setState] = useState<AppState>(initialState)
   const [currentUserId, setCurrentUserId] = useState('u-learner-1')
+  const [coursesSyncStatus, setCoursesSyncStatus] = useState<CoursesSyncStatus>(() =>
+    getSupabaseBrowserClient() ? 'loading' : 'local_only',
+  )
+  const [coursesSyncMessage, setCoursesSyncMessage] = useState<string | null>(null)
+
+  const clearCoursesSyncMessage = useCallback(() => setCoursesSyncMessage(null), [])
+
+  useEffect(() => {
+    if (!getSupabaseBrowserClient()) {
+      setCoursesSyncStatus('local_only')
+      return
+    }
+
+    let cancelled = false
+    void (async () => {
+      setCoursesSyncStatus('loading')
+      try {
+        const merged = await loadCoursesFromSupabase(initialState.courses)
+        if (cancelled) return
+        setState((s) => ({ ...s, courses: merged }))
+        setCoursesSyncStatus('synced')
+        setCoursesSyncMessage(null)
+      } catch (e) {
+        if (cancelled) return
+        setCoursesSyncStatus('error')
+        setCoursesSyncMessage(e instanceof Error ? e.message : 'Could not load courses from Supabase.')
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const currentUser = useMemo(
     () => state.users.find((user) => user.id === currentUserId) ?? null,
@@ -395,6 +454,44 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
     [currentUser, state.courses, getActiveEnrollment, appendCompletionArtifacts],
   )
 
+  const updateCourseSegmentMux = useCallback(
+    (
+      courseId: string,
+      segmentId: string,
+      mux: Partial<
+        Pick<
+          CourseSegment,
+          'muxUploadId' | 'muxAssetId' | 'muxPlaybackId' | 'muxStatus' | 'muxErrorMessage'
+        >
+      >,
+    ) => {
+      setState((prev) => {
+        const course = prev.courses.find((c) => c.id === courseId)
+        if (!course) return prev
+        const now = new Date().toISOString()
+        const nextCourse: Course = {
+          ...course,
+          updatedAt: now,
+          segments: course.segments.map((segment) =>
+            segment.id !== segmentId ? segment : { ...segment, ...mux },
+          ),
+        }
+        if (getSupabaseBrowserClient()) {
+          void persistCourseToSupabase(nextCourse).then((r) => {
+            if (!r.ok) {
+              setCoursesSyncMessage(`Could not save course to Supabase: ${r.message}`)
+            }
+          })
+        }
+        return {
+          ...prev,
+          courses: prev.courses.map((c) => (c.id === courseId ? nextCourse : c)),
+        }
+      })
+    },
+    [],
+  )
+
   const transitionCourseStatus = useCallback(
     (courseId: string, nextStatus: CourseStatus): ActionResult => {
       const course = state.courses.find((entry) => entry.id === courseId)
@@ -411,18 +508,28 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
         return { ok: false, message: 'You do not have permission for this transition.' }
       }
 
-      setState((prev) => ({
-        ...prev,
-        courses: prev.courses.map((entry) =>
-          entry.id === courseId
-            ? {
-                ...entry,
-                status: nextStatus,
-                publishedAt: nextStatus === 'published' ? new Date().toISOString() : entry.publishedAt,
-              }
-            : entry,
-        ),
-      }))
+      setState((prev) => {
+        const entry = prev.courses.find((c) => c.id === courseId)
+        if (!entry) return prev
+        const now = new Date().toISOString()
+        const nextCourse: Course = {
+          ...entry,
+          status: nextStatus,
+          publishedAt: nextStatus === 'published' ? now : entry.publishedAt,
+          updatedAt: now,
+        }
+        if (getSupabaseBrowserClient()) {
+          void persistCourseToSupabase(nextCourse).then((r) => {
+            if (!r.ok) {
+              setCoursesSyncMessage(`Could not save course to Supabase: ${r.message}`)
+            }
+          })
+        }
+        return {
+          ...prev,
+          courses: prev.courses.map((c) => (c.id === courseId ? nextCourse : c)),
+        }
+      })
       return { ok: true }
     },
     [state.courses, currentUserRole, currentUser],
@@ -488,10 +595,14 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       markSegmentWatched,
       submitQuizAttempt,
       transitionCourseStatus,
+      updateCourseSegmentMux,
       toggleWebinarAttendance,
       getCourseReadiness,
       getActiveEnrollment,
       transcriptForCurrentUser,
+      coursesSyncStatus,
+      coursesSyncMessage,
+      clearCoursesSyncMessage,
     }),
     [
       state,
@@ -506,10 +617,14 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       markSegmentWatched,
       submitQuizAttempt,
       transitionCourseStatus,
+      updateCourseSegmentMux,
       toggleWebinarAttendance,
       getCourseReadiness,
       getActiveEnrollment,
       transcriptForCurrentUser,
+      coursesSyncStatus,
+      coursesSyncMessage,
+      clearCoursesSyncMessage,
     ],
   )
 

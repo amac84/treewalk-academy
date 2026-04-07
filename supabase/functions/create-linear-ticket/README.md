@@ -34,3 +34,13 @@ curl -i -X POST "http://127.0.0.1:54321/functions/v1/create-linear-ticket" \
 ```
 
 Images are uploaded to Linear storage via `fileUpload`, then embedded in the issue description. Max size **5MB**; types **PNG, JPEG, WebP, GIF**.
+
+## Safety / security (server-side)
+
+The function applies extra checks beyond MIME type:
+
+- **Text:** strips control characters; blocks `javascript:`, `data:`, and `vbscript:` inside markdown-style links; blocks a small set of high-risk HTML tag names (`script`, `iframe`, etc.).
+- **Route:** only allows a path-shaped string (safe for markdown); invalid values become `unknown-route`.
+- **Images:** verifies **magic bytes** match declared type so non-images cannot be uploaded as PNG/JPEG/etc.
+
+Linear still renders markdown on its side; these rules reduce junk, misleading links, and malformed uploads. For abuse at scale, add **rate limiting** (e.g. per IP) or **auth** in front of the function separately.

@@ -1,0 +1,22 @@
+# Dependencies & build output (root and nested)
+node_modules/
+dist/
+*.local
+
+# Secrets — never commit real credentials (tracked templates use *.example only)
+.env
+.env.local
+.env.*.local
+
+# Keys and tokens
+*.pem
+.id_rsa
+*.p12
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
