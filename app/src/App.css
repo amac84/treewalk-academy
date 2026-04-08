@@ -148,7 +148,7 @@ body {
 .feedback-bar-input-wrap {
   width: 100%;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
 }
 
 .feedback-bar-trailing {
@@ -158,20 +158,23 @@ body {
   flex-shrink: 0;
 }
 
-.feedback-bar input {
+.feedback-bar textarea {
   width: 100%;
   box-sizing: border-box;
-  height: var(--feedback-bar-row-height);
   min-height: var(--feedback-bar-row-height);
+  max-height: 200px;
   border-radius: 12px;
   border: 1px solid var(--feedback-outline);
   background: #181818;
-  padding: 0 14px;
+  padding: 8px 14px;
   font-size: 15px;
-  line-height: calc(var(--feedback-bar-row-height) - 2px);
+  font-family: inherit;
+  line-height: 1.35;
+  resize: none;
+  overflow-y: auto;
 }
 
-.feedback-bar input:focus {
+.feedback-bar textarea:focus {
   outline: none;
   box-shadow: 0 0 0 2px rgba(243, 212, 71, 0.25);
 }
@@ -937,9 +940,9 @@ th {
     border-radius: 8px;
   }
 
-  .feedback-bar input {
+  .feedback-bar textarea {
     font-size: 14px;
-    line-height: calc(var(--feedback-bar-row-height) - 2px);
+    padding: 6px 12px;
   }
 
   .feedback-attach svg,
