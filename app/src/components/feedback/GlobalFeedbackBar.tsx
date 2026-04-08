@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
-import type { ClipboardEvent, FormEvent } from 'react'
+import type { ChangeEvent, ClipboardEvent, FormEvent } from 'react'
 import { useLocation } from 'react-router-dom'
 import { submitFeedback } from '../../lib/feedback'
 
@@ -7,6 +7,8 @@ type SubmitStatus = 'idle' | 'saving' | 'success' | 'error'
 
 const IMAGE_ACCEPT = 'image/png,image/jpeg,image/jpg,image/webp,image/gif'
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+/** Matches supabase/functions/create-linear-ticket MAX_MESSAGE_LENGTH */
+const MAX_MESSAGE_LENGTH = 12000
 
 const ALLOWED_IMAGE_MIME = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif'])
 
@@ -125,33 +127,48 @@ function pickImageFileFromDataTransfer(data: DataTransfer | null): File | null {
   return null
 }
 
+function useAutosizeTextArea(text: string) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) {
+      return
+    }
+    el.style.height = '0px'
+    const next = Math.min(el.scrollHeight, 200)
+    el.style.height = `${next}px`
+  }, [text])
+
+  return ref
+}
+
 export function GlobalFeedbackBar() {
   const location = useLocation()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [message, setMessage] = useState('')
+  const messageRef = useAutosizeTextArea(message)
   const [attachment, setAttachment] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [status, setStatus] = useState<SubmitStatus>('idle')
   const [statusCopy, setStatusCopy] = useState('')
 
-  useLayoutEffect(() => {
-    if (!attachment) {
-      setPreviewUrl(null)
-      return
-    }
-    const url = URL.createObjectURL(attachment)
-    setPreviewUrl(url)
-    return () => {
-      URL.revokeObjectURL(url)
-    }
-  }, [attachment])
+  const replaceAttachment = useCallback((next: File | null) => {
+    setPreviewUrl((prevUrl) => {
+      if (prevUrl) {
+        URL.revokeObjectURL(prevUrl)
+      }
+      return next ? URL.createObjectURL(next) : null
+    })
+    setAttachment(next)
+  }, [])
 
-  function clearAttachment() {
-    setAttachment(null)
+  const clearAttachment = useCallback(() => {
+    replaceAttachment(null)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
-  }
+  }, [replaceAttachment])
 
   const canSubmit = message.trim().length > 0 || Boolean(attachment)
   const isDisabled = status === 'saving' || !canSubmit
@@ -206,14 +223,14 @@ export function GlobalFeedbackBar() {
         setStatusCopy('Image is too large (max 5MB).')
         return
       }
-      setAttachment(prepared)
+      replaceAttachment(prepared)
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
       }
       setStatus('idle')
       setStatusCopy('')
     },
-    [],
+    [replaceAttachment],
   )
 
   function onPasteCapture(event: ClipboardEvent<Element>) {
@@ -257,11 +274,12 @@ export function GlobalFeedbackBar() {
             </div>
           ) : null}
           <div className="feedback-bar-input-wrap">
-            <input
+            <textarea
+              ref={messageRef}
               id="feedback-message"
               name="message"
               value={message}
-              onChange={(event) => {
+              onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
                 setMessage(event.target.value)
                 if (status !== 'idle') {
                   setStatus('idle')
@@ -270,7 +288,8 @@ export function GlobalFeedbackBar() {
               }}
               placeholder="Describe what happened, or paste a screenshot (Ctrl+V)…"
               autoComplete="off"
-              maxLength={500}
+              maxLength={MAX_MESSAGE_LENGTH}
+              rows={1}
               aria-label="Bug report"
             />
           </div>
@@ -286,7 +305,7 @@ export function GlobalFeedbackBar() {
             onChange={(event) => {
               const raw = event.target.files?.[0] ?? null
               if (!raw) {
-                setAttachment(null)
+                replaceAttachment(null)
                 return
               }
               void (async () => {
