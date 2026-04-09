@@ -1,6 +1,6 @@
 /**
- * Mux Video API proxy for direct uploads and upload/asset status polling.
- * Secrets: MUX_TOKEN_ID, MUX_TOKEN_SECRET (Supabase Edge Function secrets).
+ * Mux Video API proxy for direct uploads/status and OpenAI transcription.
+ * Secrets: MUX_TOKEN_ID, MUX_TOKEN_SECRET, OPENAI_API_KEY (Edge Function secrets).
  *
  * Auth: set MUX_ALLOW_UNAUTHENTICATED=true only for local/dev with the mock UI.
  * Otherwise require Authorization: Bearer <Supabase user JWT>.
@@ -38,11 +38,21 @@ Deno.serve(async (request) => {
     return auth.response
   }
 
-  let body: Record<string, unknown>
+  const contentType = request.headers.get('content-type')?.toLowerCase() ?? ''
+  let body: Record<string, unknown> = {}
+  let formData: FormData | null = null
   try {
-    body = (await request.json()) as Record<string, unknown>
+    if (contentType.includes('multipart/form-data')) {
+      formData = await request.formData()
+      const actionField = formData.get('action')
+      body = {
+        action: typeof actionField === 'string' ? actionField : '',
+      }
+    } else {
+      body = (await request.json()) as Record<string, unknown>
+    }
   } catch {
-    return jsonResponse({ ok: false, error: 'Invalid JSON body.' }, 400)
+    return jsonResponse({ ok: false, error: 'Invalid request body.' }, 400)
   }
 
   const action = typeof body.action === 'string' ? body.action : ''
@@ -55,9 +65,17 @@ Deno.serve(async (request) => {
         return await handleGetUpload(tokenId, tokenSecret, body)
       case 'get_asset':
         return await handleGetAsset(tokenId, tokenSecret, body)
+      case 'transcribe_file':
+        if (!formData) {
+          return jsonResponse({ ok: false, error: 'transcribe_file requires multipart/form-data.' }, 400)
+        }
+        return await handleTranscribeFile(formData)
       default:
         return jsonResponse(
-          { ok: false, error: 'Unknown action. Use create_direct_upload, get_upload, or get_asset.' },
+          {
+            ok: false,
+            error: 'Unknown action. Use create_direct_upload, get_upload, get_asset, or transcribe_file.',
+          },
           400,
         )
     }
@@ -219,6 +237,57 @@ async function handleGetAsset(
     playbackId,
     playbackIds: data?.playback_ids ?? [],
   })
+}
+
+async function handleTranscribeFile(formData: FormData): Promise<Response> {
+  const openAiApiKey = Deno.env.get('OPENAI_API_KEY')
+  if (!openAiApiKey) {
+    return jsonResponse({ ok: false, error: 'OpenAI is not configured (missing OPENAI_API_KEY).' }, 500)
+  }
+
+  const fileValue = formData.get('file')
+  if (!(fileValue instanceof File)) {
+    return jsonResponse({ ok: false, error: 'file is required and must be a file upload.' }, 400)
+  }
+  if (fileValue.size === 0) {
+    return jsonResponse({ ok: false, error: 'Uploaded file is empty.' }, 400)
+  }
+
+  const languageValue = formData.get('language')
+  const language = typeof languageValue === 'string' ? languageValue.trim() : ''
+  const modelValue = formData.get('model')
+  const modelFromRequest = typeof modelValue === 'string' ? modelValue.trim() : ''
+  const model = modelFromRequest || Deno.env.get('OPENAI_TRANSCRIBE_MODEL')?.trim() || 'gpt-4o-mini-transcribe'
+
+  const payload = new FormData()
+  payload.append('model', model)
+  payload.append('file', fileValue, fileValue.name || 'upload.mp4')
+  if (language) payload.append('language', language)
+
+  const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${openAiApiKey}`,
+    },
+    body: payload,
+  })
+  const json = (await response.json().catch(() => null)) as Record<string, unknown> | null
+  if (!response.ok) {
+    const message =
+      (typeof json?.error === 'object' &&
+        json?.error &&
+        typeof (json.error as Record<string, unknown>).message === 'string' &&
+        (json.error as Record<string, unknown>).message) ||
+      (typeof json?.error === 'string' && json.error) ||
+      `OpenAI transcription error (${response.status}).`
+    return jsonResponse({ ok: false, error: message }, 502)
+  }
+
+  const text = typeof json?.text === 'string' ? json.text : ''
+  if (!text) {
+    return jsonResponse({ ok: false, error: 'OpenAI returned an empty transcript.' }, 502)
+  }
+  return jsonResponse({ ok: true, text, model })
 }
 
 type MuxEnvelope<T> = {

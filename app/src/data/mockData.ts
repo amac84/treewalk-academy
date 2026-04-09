@@ -1,3 +1,11 @@
+/**
+ * MOCK DATA — synthetic seed content for development and demos only.
+ *
+ * Nothing here is production user or course data. The app boots from
+ * `mockInitialState`; Supabase may copy `mockInitialState.courses`
+ * into `academy_courses` when that table is empty.
+ */
+
 import { calculateCPDHours } from '../lib/cpd'
 import type {
   AppState,
@@ -20,7 +28,7 @@ const isoDaysFromNow = (daysFromNow: number): string => {
   return date.toISOString()
 }
 
-const users: User[] = [
+const mockUsers: User[] = [
   {
     id: 'u-learner-1',
     name: 'Alex Chen, CPA',
@@ -77,7 +85,7 @@ const users: User[] = [
   },
 ]
 
-const invites: Invite[] = [
+const mockInvites: Invite[] = [
   {
     id: 'inv-1',
     email: 'new.cpa@treewalk.test',
@@ -89,7 +97,7 @@ const invites: Invite[] = [
   },
 ]
 
-const courses: Course[] = [
+const mockCourses: Course[] = [
   {
     id: 'course-ethics-2026',
     title: 'Ethics in Public Practice 2026',
@@ -117,6 +125,7 @@ const courses: Course[] = [
           { id: 'a', label: 'Relying on prior year treatment only', isCorrect: false },
           { id: 'b', label: 'Documenting alternatives and rationale', isCorrect: true },
           { id: 'c', label: 'Prioritizing client preference over evidence', isCorrect: false },
+          { id: 'd', label: 'Accepting material uncertainty without disclosure', isCorrect: false },
         ],
       },
       {
@@ -126,6 +135,7 @@ const courses: Course[] = [
           { id: 'a', label: 'No safeguard if workload is high', isCorrect: false },
           { id: 'b', label: 'Independent review and documented approvals', isCorrect: true },
           { id: 'c', label: 'Verbal acknowledgement only', isCorrect: false },
+          { id: 'd', label: 'Relying only on informal peer feedback', isCorrect: false },
         ],
       },
     ],
@@ -160,6 +170,7 @@ const courses: Course[] = [
           { id: 'a', label: 'Update client advisory notes and filing playbooks', isCorrect: true },
           { id: 'b', label: 'Delay updates to next quarter', isCorrect: false },
           { id: 'c', label: 'Communicate informally with no tracking', isCorrect: false },
+          { id: 'd', label: 'Wait until audit comments are finalized', isCorrect: false },
         ],
       },
     ],
@@ -194,6 +205,7 @@ const courses: Course[] = [
           { id: 'a', label: 'Undefined accountability', isCorrect: false },
           { id: 'b', label: 'Traceable decisions and oversight', isCorrect: true },
           { id: 'c', label: 'No monitoring baseline', isCorrect: false },
+          { id: 'd', label: 'Model access with no role controls', isCorrect: false },
         ],
       },
     ],
@@ -227,6 +239,7 @@ const courses: Course[] = [
           { id: 'a', label: 'an explicit recommendation and next step', isCorrect: true },
           { id: 'b', label: 'a broad summary only', isCorrect: false },
           { id: 'c', label: 'raw data with no interpretation', isCorrect: false },
+          { id: 'd', label: 'multiple disconnected insights with no priority', isCorrect: false },
         ],
       },
     ],
@@ -236,7 +249,7 @@ const courses: Course[] = [
   },
 ]
 
-const enrollments: Enrollment[] = [
+const mockEnrollments: Enrollment[] = [
   {
     id: 'enr-1',
     userId: 'u-learner-1',
@@ -259,7 +272,7 @@ const enrollments: Enrollment[] = [
   },
 ]
 
-const webinars: Webinar[] = [
+const mockWebinars: Webinar[] = [
   {
     id: 'webinar-q2-planning',
     title: 'Q2 Planning Roundtable for Practice Leaders',
@@ -286,11 +299,11 @@ const webinars: Webinar[] = [
   },
 ]
 
-export const initialState: AppState = {
-  users,
-  invites,
-  courses,
-  enrollments,
+export const mockInitialState: AppState = {
+  users: mockUsers,
+  invites: mockInvites,
+  courses: mockCourses,
+  enrollments: mockEnrollments,
   progress: {},
   completions: [
     {
@@ -313,7 +326,7 @@ export const initialState: AppState = {
       issuedAt: isoDaysAgo(7),
     },
   ],
-  webinars,
+  webinars: mockWebinars,
   webinarAttendances: [
     {
       id: 'wa-1',
@@ -351,3 +364,6 @@ export const initialState: AppState = {
     },
   ],
 }
+
+/** @alias mockInitialState */
+export const initialState = mockInitialState

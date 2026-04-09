@@ -1,11 +1,15 @@
 import { createContext } from 'react'
 import type {
   AppState,
+  Course,
+  CourseLevel,
   CourseSegment,
   CoursesSyncStatus,
   CourseStatus,
+  CourseTopic,
   Enrollment,
   Invite,
+  QuizQuestion,
   QuizAttempt,
   User,
   UserRole,
@@ -15,6 +19,28 @@ import type { evaluateCompletion } from '../lib/courseLogic'
 interface ActionResult {
   ok: boolean
   message?: string
+}
+
+export interface CreateCourseInput {
+  title: string
+  summary: string
+  description: string
+  category: string
+  topic: CourseTopic
+  level: CourseLevel
+  instructorId?: string
+  segments: Array<Pick<CourseSegment, 'title' | 'durationMinutes'>>
+  quiz?: QuizQuestion[]
+}
+
+export interface UpdateCourseInput {
+  title: string
+  summary: string
+  description: string
+  category: string
+  topic: CourseTopic
+  level: CourseLevel
+  instructorId?: string
 }
 
 export interface AppStoreContextValue extends AppState {
@@ -30,6 +56,12 @@ export interface AppStoreContextValue extends AppState {
   enrollInCourse: (courseId: string) => ActionResult
   markSegmentWatched: (courseId: string, segmentId: string) => ActionResult
   submitQuizAttempt: (courseId: string, answers: Record<string, string>) => QuizAttempt | null
+  createCourse: (input: CreateCourseInput) => { ok: true; course: Course } | { ok: false; message: string }
+  addCourseSegment: (
+    courseId: string,
+    segment: Pick<CourseSegment, 'title' | 'durationMinutes'>,
+  ) => ActionResult
+  updateCourseDetails: (courseId: string, input: UpdateCourseInput) => ActionResult
   transitionCourseStatus: (courseId: string, nextStatus: CourseStatus) => ActionResult
   updateCourseSegmentMux: (
     courseId: string,
@@ -37,7 +69,14 @@ export interface AppStoreContextValue extends AppState {
     mux: Partial<
       Pick<
         CourseSegment,
-        'muxUploadId' | 'muxAssetId' | 'muxPlaybackId' | 'muxStatus' | 'muxErrorMessage'
+        | 'muxUploadId'
+        | 'muxAssetId'
+        | 'muxPlaybackId'
+        | 'muxStatus'
+        | 'muxErrorMessage'
+        | 'transcriptText'
+        | 'transcriptStatus'
+        | 'transcriptErrorMessage'
       >
     >,
   ) => void

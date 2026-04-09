@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { REQUIRED_PASSING_SCORE } from '../constants'
-import { initialState } from '../data/mockData'
+import { mockInitialState } from '../data/mockData'
 import { persistCourseToSupabase, loadCoursesFromSupabase } from '../lib/coursePersistence'
 import { calculateCPDHours } from '../lib/cpd'
 import { getSupabaseBrowserClient } from '../lib/supabaseClient'
@@ -13,53 +13,27 @@ import {
 import type {
   AppState,
   Course,
+  CourseLevel,
   CourseSegment,
   CoursesSyncStatus,
   CourseStatus,
+  CourseTopic,
   Enrollment,
   Invite,
   QuizAttempt,
   User,
   UserRole,
 } from '../types'
-import { AppStoreContext } from './AppStoreContext'
+import {
+  AppStoreContext,
+  type AppStoreContextValue,
+  type CreateCourseInput,
+  type UpdateCourseInput,
+} from './AppStoreContext'
 
 interface ActionResult {
   ok: boolean
   message?: string
-}
-
-export interface AppStoreContextValue extends AppState {
-  state: AppState
-  currentUserId: string
-  currentUser: User | null
-  currentUserRole: UserRole | null
-  setCurrentUser: (userId: string) => void
-  issueInvite: (email: string, role: UserRole) => Invite
-  inviteUser: (email: string, fullName: string, role: UserRole) => Invite
-  acceptInvite: (code: string) => { ok: true; user: User } | { ok: false; error: string }
-  suspendUser: (userId: string, suspended?: boolean) => void
-  enrollInCourse: (courseId: string) => ActionResult
-  markSegmentWatched: (courseId: string, segmentId: string) => ActionResult
-  submitQuizAttempt: (courseId: string, answers: Record<string, string>) => QuizAttempt | null
-  transitionCourseStatus: (courseId: string, nextStatus: CourseStatus) => ActionResult
-  updateCourseSegmentMux: (
-    courseId: string,
-    segmentId: string,
-    mux: Partial<
-      Pick<
-        CourseSegment,
-        'muxUploadId' | 'muxAssetId' | 'muxPlaybackId' | 'muxStatus' | 'muxErrorMessage'
-      >
-    >,
-  ) => void
-  toggleWebinarAttendance: (webinarId: string) => void
-  getCourseReadiness: (courseId: string, userId?: string) => ReturnType<typeof evaluateCompletion>
-  getActiveEnrollment: (userId: string, courseId: string) => Enrollment | null
-  transcriptForCurrentUser: AppState['transcript']
-  coursesSyncStatus: CoursesSyncStatus
-  coursesSyncMessage: string | null
-  clearCoursesSyncMessage: () => void
 }
 
 const createCode = () =>
@@ -67,6 +41,27 @@ const createCode = () =>
 
 const createId = (prefix: string) =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+/** Who may attach or replace Mux assets on course segments (matches AdminCoursesPage visibility). */
+const canManageCourseMux = (role: UserRole | null, course: Course, userId: string): boolean => {
+  if (!role) return false
+  if (role === 'super_admin' || role === 'content_admin') return true
+  if (role === 'instructor') return course.instructorId === userId
+  return false
+}
+
+const canAuthorCourses = (role: UserRole | null): boolean =>
+  role === 'instructor' || role === 'content_admin' || role === 'super_admin'
+
+const sanitizeCourseDetails = (input: UpdateCourseInput): Omit<UpdateCourseInput, 'instructorId'> & { instructorId?: string } => ({
+  title: input.title.trim(),
+  summary: input.summary.trim(),
+  description: input.description.trim(),
+  category: input.category.trim(),
+  topic: input.topic as CourseTopic,
+  level: input.level as CourseLevel,
+  instructorId: input.instructorId?.trim(),
+})
 
 const canTransitionCourseStatus = (
   role: UserRole | null,
@@ -94,7 +89,7 @@ const canTransitionCourseStatus = (
 }
 
 export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
-  const [state, setState] = useState<AppState>(initialState)
+  const [state, setState] = useState<AppState>(mockInitialState)
   const [currentUserId, setCurrentUserId] = useState('u-learner-1')
   const [coursesSyncStatus, setCoursesSyncStatus] = useState<CoursesSyncStatus>(() =>
     getSupabaseBrowserClient() ? 'loading' : 'local_only',
@@ -105,7 +100,6 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     if (!getSupabaseBrowserClient()) {
-      setCoursesSyncStatus('local_only')
       return
     }
 
@@ -113,7 +107,7 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
     void (async () => {
       setCoursesSyncStatus('loading')
       try {
-        const merged = await loadCoursesFromSupabase(initialState.courses)
+        const merged = await loadCoursesFromSupabase(mockInitialState.courses)
         if (cancelled) return
         setState((s) => ({ ...s, courses: merged }))
         setCoursesSyncStatus('synced')
@@ -454,6 +448,162 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
     [currentUser, state.courses, getActiveEnrollment, appendCompletionArtifacts],
   )
 
+  const createCourse = useCallback(
+    (input: CreateCourseInput): { ok: true; course: Course } | { ok: false; message: string } => {
+      if (!currentUser || !canAuthorCourses(currentUserRole)) {
+        return { ok: false, message: 'You do not have permission to create courses.' }
+      }
+
+      const title = input.title.trim()
+      if (!title) return { ok: false, message: 'Course title is required.' }
+      if (input.segments.length === 0) {
+        return { ok: false, message: 'At least one segment is required.' }
+      }
+
+      const now = new Date().toISOString()
+      const sanitizedSegments = input.segments.map((segment, index) => ({
+        id: createId('seg'),
+        title: segment.title.trim() || `Segment ${index + 1}`,
+        durationMinutes: Math.max(1, Math.round(segment.durationMinutes)),
+        order: index + 1,
+        muxStatus: 'idle' as const,
+        transcriptStatus: 'idle' as const,
+      }))
+      const totalMinutes = sanitizedSegments.reduce((sum, segment) => sum + segment.durationMinutes, 0)
+
+      const course: Course = {
+        id: createId('crs'),
+        title,
+        summary: input.summary.trim() || 'New course',
+        description: input.description.trim() || input.summary.trim() || title,
+        category: input.category.trim() || 'General',
+        topic: input.topic,
+        level: input.level,
+        instructorId:
+          currentUser.role === 'instructor'
+            ? currentUser.id
+            : input.instructorId?.trim() || currentUser.id,
+        status: 'draft',
+        videoMinutes: totalMinutes,
+        cpdHoursOverride: null,
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+        segments: sanitizedSegments,
+        quiz: input.quiz ?? [],
+      }
+
+      setState((prev) => ({ ...prev, courses: [course, ...prev.courses] }))
+      if (getSupabaseBrowserClient()) {
+        void persistCourseToSupabase(course).then((r) => {
+          if (!r.ok) {
+            setCoursesSyncMessage(`Could not save course to Supabase: ${r.message}`)
+          }
+        })
+      }
+      return { ok: true, course }
+    },
+    [currentUser, currentUserRole],
+  )
+
+  const addCourseSegment = useCallback(
+    (courseId: string, segment: Pick<CourseSegment, 'title' | 'durationMinutes'>): ActionResult => {
+      if (!currentUser || !currentUserRole) {
+        return { ok: false, message: 'Please sign in.' }
+      }
+      if (!segment.title.trim()) {
+        return { ok: false, message: 'Segment title is required.' }
+      }
+
+      const course = state.courses.find((entry) => entry.id === courseId)
+      if (!course) return { ok: false, message: 'Course not found.' }
+      if (!canManageCourseMux(currentUserRole, course, currentUser.id)) {
+        return { ok: false, message: 'You do not have permission to edit this course.' }
+      }
+
+      const now = new Date().toISOString()
+      const nextSegment: CourseSegment = {
+        id: createId('seg'),
+        title: segment.title.trim(),
+        durationMinutes: Math.max(1, Math.round(segment.durationMinutes)),
+        order: course.segments.length + 1,
+        muxStatus: 'idle',
+        transcriptStatus: 'idle',
+      }
+      const nextCourse: Course = {
+        ...course,
+        updatedAt: now,
+        videoMinutes: course.videoMinutes + nextSegment.durationMinutes,
+        segments: [...course.segments, nextSegment],
+      }
+
+      setState((prev) => ({
+        ...prev,
+        courses: prev.courses.map((entry) => (entry.id === courseId ? nextCourse : entry)),
+      }))
+      if (getSupabaseBrowserClient()) {
+        void persistCourseToSupabase(nextCourse).then((r) => {
+          if (!r.ok) {
+            setCoursesSyncMessage(`Could not save course to Supabase: ${r.message}`)
+          }
+        })
+      }
+      return { ok: true }
+    },
+    [currentUser, currentUserRole, state.courses],
+  )
+
+  const updateCourseDetails = useCallback(
+    (courseId: string, input: UpdateCourseInput): ActionResult => {
+      if (!currentUser || !currentUserRole) {
+        return { ok: false, message: 'Please sign in.' }
+      }
+
+      const course = state.courses.find((entry) => entry.id === courseId)
+      if (!course) return { ok: false, message: 'Course not found.' }
+      if (!canManageCourseMux(currentUserRole, course, currentUser.id)) {
+        return { ok: false, message: 'You do not have permission to edit this course.' }
+      }
+
+      const next = sanitizeCourseDetails(input)
+      if (!next.title) return { ok: false, message: 'Course title is required.' }
+      if (!next.summary) return { ok: false, message: 'Course summary is required.' }
+      if (!next.description) return { ok: false, message: 'Course description is required.' }
+      if (!next.category) return { ok: false, message: 'Course category is required.' }
+
+      const now = new Date().toISOString()
+      const nextInstructorId =
+        currentUserRole === 'content_admin' || currentUserRole === 'super_admin'
+          ? next.instructorId || course.instructorId
+          : course.instructorId
+      const nextCourse: Course = {
+        ...course,
+        title: next.title,
+        summary: next.summary,
+        description: next.description,
+        category: next.category,
+        topic: next.topic,
+        level: next.level,
+        instructorId: nextInstructorId,
+        updatedAt: now,
+      }
+
+      setState((prev) => ({
+        ...prev,
+        courses: prev.courses.map((entry) => (entry.id === courseId ? nextCourse : entry)),
+      }))
+      if (getSupabaseBrowserClient()) {
+        void persistCourseToSupabase(nextCourse).then((r) => {
+          if (!r.ok) {
+            setCoursesSyncMessage(`Could not save course to Supabase: ${r.message}`)
+          }
+        })
+      }
+      return { ok: true }
+    },
+    [currentUser, currentUserRole, state.courses],
+  )
+
   const updateCourseSegmentMux = useCallback(
     (
       courseId: string,
@@ -461,13 +611,21 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       mux: Partial<
         Pick<
           CourseSegment,
-          'muxUploadId' | 'muxAssetId' | 'muxPlaybackId' | 'muxStatus' | 'muxErrorMessage'
+          | 'muxUploadId'
+          | 'muxAssetId'
+          | 'muxPlaybackId'
+          | 'muxStatus'
+          | 'muxErrorMessage'
+          | 'transcriptText'
+          | 'transcriptStatus'
+          | 'transcriptErrorMessage'
         >
       >,
     ) => {
       setState((prev) => {
         const course = prev.courses.find((c) => c.id === courseId)
         if (!course) return prev
+        if (!canManageCourseMux(currentUserRole, course, currentUserId)) return prev
         const now = new Date().toISOString()
         const nextCourse: Course = {
           ...course,
@@ -489,7 +647,7 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
         }
       })
     },
-    [],
+    [currentUserRole, currentUserId],
   )
 
   const transitionCourseStatus = useCallback(
@@ -594,6 +752,9 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       enrollInCourse,
       markSegmentWatched,
       submitQuizAttempt,
+      createCourse,
+      addCourseSegment,
+      updateCourseDetails,
       transitionCourseStatus,
       updateCourseSegmentMux,
       toggleWebinarAttendance,
@@ -616,6 +777,9 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       enrollInCourse,
       markSegmentWatched,
       submitQuizAttempt,
+      createCourse,
+      addCourseSegment,
+      updateCourseDetails,
       transitionCourseStatus,
       updateCourseSegmentMux,
       toggleWebinarAttendance,

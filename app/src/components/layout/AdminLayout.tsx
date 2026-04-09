@@ -10,21 +10,28 @@ const links = [
 
 export function AdminLayout() {
   return (
-    <div className="app-shell admin-shell">
-      <aside className="sidebar">
-        <div>
-          <div className="brand-mark">Treewalk Admin</div>
-          <p className="visually-muted">Functional mode for operations.</p>
-          <nav className="side-nav">
-            {links.map((link) => (
-              <NavLink key={link.to} to={link.to} end={link.to === '/admin'}>
-                {link.label}
-              </NavLink>
-            ))}
+    <div className="app-shell app-shell--admin">
+      <aside className="sidebar sidebar--admin">
+        <div className="sidebar__top">
+          <div className="brand-lockup">
+            <span className="brand-mark">Treewalk Admin</span>
+            <p className="brand-note">Operational view for catalog, reporting, and user controls.</p>
+          </div>
+
+          <nav className="side-nav side-nav--admin">
+            <div className="side-nav__group">
+              <p className="side-nav__label">Operations</p>
+              {links.map((link) => (
+                <NavLink key={link.to} to={link.to} end={link.to === '/admin'}>
+                  {link.label}
+                </NavLink>
+              ))}
+            </div>
           </nav>
         </div>
 
         <div className="sidebar-footer">
+          <p>Dense, quiet, accountable.</p>
           <Link to="/home">← Back to learner mode</Link>
         </div>
       </aside>

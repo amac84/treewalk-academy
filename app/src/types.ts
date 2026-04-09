@@ -42,6 +42,7 @@ export interface Invite {
 }
 
 export type MuxSegmentStatus = 'idle' | 'uploading' | 'processing' | 'ready' | 'error'
+export type SegmentTranscriptStatus = 'idle' | 'processing' | 'ready' | 'error'
 
 export interface CourseSegment {
   id: string
@@ -54,6 +55,9 @@ export interface CourseSegment {
   muxPlaybackId?: string
   muxStatus?: MuxSegmentStatus
   muxErrorMessage?: string
+  transcriptText?: string
+  transcriptStatus?: SegmentTranscriptStatus
+  transcriptErrorMessage?: string
 }
 
 export interface QuizOption {

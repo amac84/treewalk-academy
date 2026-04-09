@@ -17,7 +17,7 @@ import { QuizPage } from './pages/learner/QuizPage'
 import { WebinarsPage } from './pages/learner/WebinarsPage'
 import type { UserRole } from './types'
 
-const learnerRoles: UserRole[] = ['learner', 'instructor']
+const learnerRoles: UserRole[] = ['learner', 'instructor', 'content_admin', 'hr_admin', 'super_admin']
 const adminRoles: UserRole[] = ['instructor', 'content_admin', 'hr_admin', 'super_admin']
 const courseAdminRoles: UserRole[] = ['instructor', 'content_admin', 'super_admin']
 const userAdminRoles: UserRole[] = ['hr_admin', 'super_admin']

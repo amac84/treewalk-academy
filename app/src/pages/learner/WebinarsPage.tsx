@@ -14,9 +14,9 @@ function WebinarCard({
   onToggleAttendance: () => void
 }) {
   return (
-    <article className="panel">
-      <header className="space-between">
-        <div>
+    <article className="webinar-item">
+      <header className="webinar-item__head">
+        <div className="stack-sm">
           <h3>{webinar.title}</h3>
           <p className="muted">{webinar.description}</p>
         </div>
@@ -61,8 +61,9 @@ export function WebinarsPage() {
   }, [webinarAttendances, currentUserId])
 
   return (
-    <section className="page">
-      <header className="stack-sm">
+    <section className="page page-learner page-webinars">
+      <header className="page-header page-header--compact">
+        <p className="section-eyebrow">Calendar</p>
         <h1>Webinars</h1>
         <p className="muted">
           Attend live Teams sessions and continue learning later when sessions are converted into
@@ -70,7 +71,7 @@ export function WebinarsPage() {
         </p>
       </header>
 
-      <div className="stack">
+      <div className="webinar-list">
         {webinars.map((webinar) => (
           <WebinarCard
             key={webinar.id}

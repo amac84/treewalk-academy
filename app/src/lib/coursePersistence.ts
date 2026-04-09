@@ -29,7 +29,8 @@ export async function persistCourseToSupabase(course: Course): Promise<{ ok: tru
 
 /**
  * Loads courses from Supabase and merges onto seed courses by id (remote wins).
- * If the table is empty, seeds all mock courses once so HoL&D sees a warm demo.
+ * If the table is empty, seeds all courses from app mock data once (`mockData.ts`)
+ * so HoL&D sees a warm demo.
  */
 export async function loadCoursesFromSupabase(seedCourses: Course[]): Promise<Course[]> {
   const sb = getSupabaseBrowserClient()
@@ -50,5 +51,8 @@ export async function loadCoursesFromSupabase(seedCourses: Course[]): Promise<Co
   }
 
   const byId = new Map(list.map((r) => [r.id, r.data]))
-  return seedCourses.map((c) => byId.get(c.id) ?? c)
+  const merged = seedCourses.map((c) => byId.get(c.id) ?? c)
+  const seedIds = new Set(seedCourses.map((c) => c.id))
+  const remoteOnly = list.map((r) => r.data).filter((c) => !seedIds.has(c.id))
+  return [...merged, ...remoteOnly]
 }

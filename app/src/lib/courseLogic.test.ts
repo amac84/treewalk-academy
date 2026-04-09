@@ -7,6 +7,7 @@ import {
 } from './courseLogic'
 import type { Course, Enrollment } from '../types'
 
+/** Test fixture only — not the app demo seed in `data/mockData.ts`. */
 const baseCourse: Course = {
   id: 'course-1',
   title: 'Test course',

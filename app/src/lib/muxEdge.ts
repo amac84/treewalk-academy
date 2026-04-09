@@ -2,16 +2,23 @@ import { getSupabaseBrowserClient } from './supabaseClient'
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+/** True when the SPA can call the mux Edge Function (direct upload + transcription). */
+export function isMuxFunctionConfigured(): boolean {
+  return Boolean(import.meta.env.VITE_MUX_FUNCTION_URL?.trim())
+}
+
 function muxFunctionUrl(): string {
   const url = import.meta.env.VITE_MUX_FUNCTION_URL?.trim()
   if (!url) {
-    throw new Error('Set VITE_MUX_FUNCTION_URL to your Supabase function URL (…/functions/v1/mux).')
+    throw new Error(
+      'Add VITE_MUX_FUNCTION_URL to app/.env (full URL to …/functions/v1/mux), then restart npm run dev.',
+    )
   }
   return url
 }
 
-async function jsonHeadersWithAuth(): Promise<Headers> {
-  const headers = new Headers({ 'Content-Type': 'application/json' })
+async function authHeaders(): Promise<Headers> {
+  const headers = new Headers()
   const supabase = getSupabaseBrowserClient()
   if (supabase) {
     const { data } = await supabase.auth.getSession()
@@ -20,6 +27,12 @@ async function jsonHeadersWithAuth(): Promise<Headers> {
       headers.set('Authorization', `Bearer ${token}`)
     }
   }
+  return headers
+}
+
+async function jsonHeadersWithAuth(): Promise<Headers> {
+  const headers = await authHeaders()
+  headers.set('Content-Type', 'application/json')
   return headers
 }
 
@@ -94,6 +107,40 @@ export async function putVideoToMuxUpload(uploadUrl: string, file: File): Promis
   })
   if (!response.ok) {
     throw new Error(`Upload to Mux failed (${response.status}).`)
+  }
+}
+
+export async function transcribeVideoFile(
+  file: File,
+  language?: string,
+): Promise<{ text: string; model?: string }> {
+  const headers = await authHeaders()
+  const form = new FormData()
+  form.append('action', 'transcribe_file')
+  form.append('file', file, file.name)
+  const model = import.meta.env.VITE_OPENAI_TRANSCRIBE_MODEL?.trim()
+  if (model) {
+    form.append('model', model)
+  }
+  if (language?.trim()) {
+    form.append('language', language.trim())
+  }
+
+  const response = await fetch(muxFunctionUrl(), {
+    method: 'POST',
+    headers,
+    body: form,
+  })
+  const json = (await response.json().catch(() => null)) as Record<string, unknown> | null
+  if (!response.ok || json?.ok !== true || typeof json?.text !== 'string') {
+    const msg =
+      (typeof json?.error === 'string' && json.error) ||
+      `Transcription request failed (${response.status}).`
+    throw new Error(msg)
+  }
+  return {
+    text: json.text,
+    model: typeof json.model === 'string' ? json.model : undefined,
   }
 }
 

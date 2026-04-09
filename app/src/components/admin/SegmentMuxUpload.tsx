@@ -2,7 +2,9 @@ import { useId, useState } from 'react'
 import { useAppStore } from '../../hooks/useAppStore'
 import {
   createMuxDirectUpload,
+  isMuxFunctionConfigured,
   putVideoToMuxUpload,
+  transcribeVideoFile,
   waitForMuxPlaybackId,
 } from '../../lib/muxEdge'
 import type { CourseSegment } from '../../types'
@@ -21,12 +23,19 @@ export function SegmentMuxUpload({ courseId, segment }: Props) {
 
   async function onFile(file: File | null) {
     if (!file) return
+    if (!isMuxFunctionConfigured()) {
+      setError(
+        'Set VITE_MUX_FUNCTION_URL in app/.env and restart the dev server before uploading.',
+      )
+      return
+    }
     setError(null)
     setSuccess(null)
     setBusy(true)
     updateCourseSegmentMux(courseId, segment.id, {
       muxStatus: 'uploading',
       muxErrorMessage: undefined,
+      transcriptErrorMessage: undefined,
     })
     try {
       const origin = typeof window !== 'undefined' ? window.location.origin : '*'
@@ -34,6 +43,7 @@ export function SegmentMuxUpload({ courseId, segment }: Props) {
       updateCourseSegmentMux(courseId, segment.id, { muxUploadId: uploadId, muxStatus: 'uploading' })
       await putVideoToMuxUpload(uploadUrl, file)
       updateCourseSegmentMux(courseId, segment.id, { muxStatus: 'processing' })
+      updateCourseSegmentMux(courseId, segment.id, { transcriptStatus: 'processing' })
       const { assetId, playbackId } = await waitForMuxPlaybackId(uploadId)
       updateCourseSegmentMux(courseId, segment.id, {
         muxAssetId: assetId,
@@ -41,10 +51,31 @@ export function SegmentMuxUpload({ courseId, segment }: Props) {
         muxStatus: 'ready',
         muxErrorMessage: undefined,
       })
-      setSuccess('Video is ready — learners can play this segment.')
+      try {
+        const transcript = await transcribeVideoFile(file)
+        updateCourseSegmentMux(courseId, segment.id, {
+          transcriptText: transcript.text,
+          transcriptStatus: 'ready',
+          transcriptErrorMessage: undefined,
+        })
+        setSuccess('Video and transcript are ready for learners.')
+      } catch (transcriptError) {
+        const transcriptMessage =
+          transcriptError instanceof Error ? transcriptError.message : 'Transcript generation failed.'
+        updateCourseSegmentMux(courseId, segment.id, {
+          transcriptStatus: 'error',
+          transcriptErrorMessage: transcriptMessage,
+        })
+        setSuccess('Video is ready. Transcript failed and can be retried with a new upload.')
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Upload failed.'
-      updateCourseSegmentMux(courseId, segment.id, { muxStatus: 'error', muxErrorMessage: msg })
+      updateCourseSegmentMux(courseId, segment.id, {
+        muxStatus: 'error',
+        muxErrorMessage: msg,
+        transcriptStatus: 'error',
+        transcriptErrorMessage: msg,
+      })
       setError(msg)
     } finally {
       setBusy(false)
@@ -66,7 +97,7 @@ export function SegmentMuxUpload({ courseId, segment }: Props) {
           id={inputId}
           type="file"
           accept="video/*"
-          disabled={busy}
+          disabled={busy || !isMuxFunctionConfigured()}
           aria-busy={busy}
           onChange={(ev) => {
             const next = ev.target.files?.[0] ?? null
@@ -79,7 +110,11 @@ export function SegmentMuxUpload({ courseId, segment }: Props) {
       {segment.muxStatus && segment.muxStatus !== 'idle' ? (
         <p className="meta-line">Mux: {segment.muxStatus}</p>
       ) : null}
+      {segment.transcriptStatus && segment.transcriptStatus !== 'idle' ? (
+        <p className="meta-line">Transcript: {segment.transcriptStatus}</p>
+      ) : null}
       {segment.muxErrorMessage ? <p className="inline-error">{segment.muxErrorMessage}</p> : null}
+      {segment.transcriptErrorMessage ? <p className="inline-error">{segment.transcriptErrorMessage}</p> : null}
       {error ? <p className="inline-error">{error}</p> : null}
       {success ? <p className="meta-line">{success}</p> : null}
     </div>

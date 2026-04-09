@@ -1,18 +1,11 @@
 import { useAppStore } from '../../hooks/useAppStore'
+import { DemoDataStrip } from './DemoDataStrip'
 
 export function CourseSyncBanner() {
   const { coursesSyncStatus, coursesSyncMessage, clearCoursesSyncMessage } = useAppStore()
 
   if (coursesSyncStatus === 'local_only') {
-    return (
-      <div className="sync-banner sync-banner--muted" role="status">
-        <span>
-          Courses are stored in this browser only. Add <code>VITE_SUPABASE_URL</code> and{' '}
-          <code>VITE_SUPABASE_ANON_KEY</code>, run the <code>academy_courses</code> migration, and deploy so
-          everyone sees the same catalog and Mux videos.
-        </span>
-      </div>
-    )
+    return <DemoDataStrip />
   }
 
   if (coursesSyncStatus === 'loading') {
@@ -47,7 +40,13 @@ export function CourseSyncBanner() {
 
   return (
     <div className="sync-banner sync-banner--ok" role="status">
-      <span>Courses and Mux playback IDs are saved to Supabase — shared for your pilot reviewers.</span>
+      <div className="sync-banner__stack">
+        <span>Courses and Mux playback IDs are saved to Supabase — shared for your pilot reviewers.</span>
+        <span className="sync-banner__subtle">
+          Learners, enrollments, completions, and transcripts are still{' '}
+          <strong>in-memory demo data</strong> in this build — they are not persisted per real user yet.
+        </span>
+      </div>
     </div>
   )
 }
