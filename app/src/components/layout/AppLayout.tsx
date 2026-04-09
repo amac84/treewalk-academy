@@ -29,40 +29,54 @@ export function AppLayout() {
   }
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div>
-          <div className="brand-mark">Treewalk Academy</div>
+    <div className="app-shell app-shell--learner">
+      <aside className="sidebar sidebar--learner">
+        <div className="sidebar__top">
+          <div className="brand-lockup">
+            <span className="brand-mark">Treewalk Academy</span>
+            <p className="brand-note">Invite-only CPD learning for modern accounting teams.</p>
+          </div>
+
           <div className="user-meta">
+            <span className="user-meta__eyebrow">Current learner</span>
             <strong>{user.name}</strong>
             <span>{roleLabel}</span>
           </div>
+
           <nav className="side-nav">
-            {learnerNav.map((item) => (
-              <NavLink key={item.to} to={item.to} end>
-                {item.label}
-              </NavLink>
-            ))}
-            <div className="divider" />
-            {adminNav.map((item) => (
-              <NavLink key={item.to} to={item.to}>
-                {item.label}
-              </NavLink>
-            ))}
+            <div className="side-nav__group">
+              <p className="side-nav__label">Learn</p>
+              {learnerNav.map((item) => (
+                <NavLink key={item.to} to={item.to} end>
+                  {item.label}
+                </NavLink>
+              ))}
+            </div>
+
+            <div className="side-nav__group">
+              <p className="side-nav__label">Operate</p>
+              {adminNav.map((item) => (
+                <NavLink key={item.to} to={item.to}>
+                  {item.label}
+                </NavLink>
+              ))}
+            </div>
           </nav>
         </div>
+
         <div className="sidebar-footer">
-          <p>Invite-only CPD platform.</p>
-          <Link to="/courses">Open course catalog</Link>
+          <p>Keep the next lesson closer than the transcript.</p>
+          <Link to="/courses">Browse published courses</Link>
         </div>
       </aside>
+
       <div className="main-column">
         <CourseSyncBanner />
         <main className="page-content">
           <Outlet />
         </main>
         <footer className="bottom-bar">
-          <span>Learning momentum: keep your weekly streak alive.</span>
+          <span>Momentum first. Resume quickly, record cleanly, keep evidence ready.</span>
           <Link to="/my-learning">View transcript</Link>
         </footer>
       </div>

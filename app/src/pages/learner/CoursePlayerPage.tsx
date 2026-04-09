@@ -13,10 +13,13 @@ export function CoursePlayerPage() {
 
   if (!course || !enrollment) {
     return (
-      <section className="empty-state">
+      <section className="player-unavailable">
+        <p className="section-eyebrow">Playback unavailable</p>
         <h1>Course unavailable</h1>
-        <p>The course could not be found or you are not enrolled.</p>
-        <Link to="/courses">Back to courses</Link>
+        <p className="page-subtitle">The course could not be found or you are not enrolled.</p>
+        <Link to="/courses" className="text-link">
+          Back to courses
+        </Link>
       </section>
     )
   }
@@ -35,22 +38,35 @@ export function CoursePlayerPage() {
   const muxEnvKey = import.meta.env.VITE_MUX_ENV_KEY?.trim()
 
   return (
-    <section className="stack-lg">
-      <header className="stack-sm">
-        <h1>{course.title}</h1>
-        <p className="muted">
-          Progress: {enrollment.watchedMinutes}/{course.videoMinutes} minutes watched (
-          {watchedPercent}%)
-        </p>
+    <section className="player-page">
+      <header className="player-header">
+        <div className="stack-sm">
+          <p className="section-eyebrow">Course player</p>
+          <h1>{course.title}</h1>
+          <p className="page-subtitle">
+            Complete each segment in order. No skipping; your record updates only after each watched step.
+          </p>
+        </div>
+        <div className="player-progress">
+          <p className="player-progress__value">{watchedPercent}%</p>
+          <p className="player-progress__meta">
+            {enrollment.watchedMinutes} of {course.videoMinutes} minutes recorded
+          </p>
+        </div>
       </header>
 
       <div className="player-layout">
         <article className="video-shell">
-          <h2>Video player</h2>
-          <p className="muted">
-            Mux playback when a segment has a playback ID (or use{' '}
-            <code>VITE_MUX_PLAYBACK_ID</code> for a single demo asset).
-          </p>
+          <div className="video-shell__head">
+            <div>
+              <p className="section-eyebrow">Now playing</p>
+              <h2>{activeSegment?.title ?? 'Playback pending'}</h2>
+            </div>
+            <p className="meta-line">
+              {activeSegment?.durationMinutes ?? 0} mins
+              {activeSegment?.muxPlaybackId ? ' · Mux ready' : ' · Demo source required'}
+            </p>
+          </div>
           <div className="video-frame mux-player-frame">
             {playbackId ? (
               <MuxPlayer
@@ -61,16 +77,35 @@ export function CoursePlayerPage() {
                 metadataVideoTitle={activeSegment?.title ?? course.title}
               />
             ) : (
-              <p className="muted">
-                <strong>Currently on:</strong> {activeSegment?.title ?? '—'}. No Mux playback ID for this
-                segment — upload from Admin → Courses or set a demo ID in env.
-              </p>
+              <div className="video-placeholder">
+                <p>
+                  <strong>Currently on:</strong> {activeSegment?.title ?? '—'}
+                </p>
+                <p>
+                  No Mux playback ID is attached to this segment yet. Upload one from Admin → Courses or
+                  provide <code>VITE_MUX_PLAYBACK_ID</code> for a demo asset.
+                </p>
+              </div>
             )}
+          </div>
+          <div className="player-actions">
+            <Link className="action-link action-link--primary" to={`/courses/${course.id}/quiz`}>
+              Go to quiz
+            </Link>
+            <Link className="action-link" to={`/courses/${course.id}`}>
+              Course details
+            </Link>
           </div>
         </article>
 
         <aside className="segment-panel">
-          <h3>Segments</h3>
+          <div className="segment-panel__head">
+            <div>
+              <p className="section-eyebrow">Segment order</p>
+              <h3>Progress ladder</h3>
+            </div>
+            <p className="meta-line">Finish the next unlocked step to continue.</p>
+          </div>
           <ul className="segment-list">
             {sortedSegments.map((segment) => {
               const isWatched = enrollment.watchedSegmentIds.includes(segment.id)
@@ -90,48 +125,38 @@ export function CoursePlayerPage() {
                     .filter(Boolean)
                     .join(' ')}
                 >
-                  <div>
-                    <button
-                      type="button"
-                      className="segment-title-btn"
-                      disabled={!canSelect}
-                      onClick={() => {
-                        if (canSelect) setSelectedSegmentId(segment.id)
-                      }}
-                    >
-                      <strong>{segment.title}</strong>
-                    </button>
-                    <p className="muted">
-                      {segment.durationMinutes} mins · {isWatched ? 'Watched' : 'Pending'}
-                      {segment.muxPlaybackId ? ' · Mux' : ''}
-                    </p>
+                  <div className="segment-copy">
+                    <p className="segment-index">{String(segment.order).padStart(2, '0')}</p>
+                    <div>
+                      <button
+                        type="button"
+                        className="segment-title-btn"
+                        disabled={!canSelect}
+                        onClick={() => {
+                          if (canSelect) setSelectedSegmentId(segment.id)
+                        }}
+                      >
+                        <strong>{segment.title}</strong>
+                      </button>
+                      <p className="meta-line">
+                        {segment.durationMinutes} mins · {isWatched ? 'Watched' : isAllowed ? 'Ready now' : 'Locked'}
+                        {segment.muxPlaybackId ? ' · Mux' : ''}
+                      </p>
+                    </div>
                   </div>
                   <button
                     type="button"
-                    className="pill-btn"
+                    className="segment-action"
                     onClick={() => markSegmentWatched(course.id, segment.id)}
                     disabled={!isAllowed || isWatched}
                   >
-                    {isWatched
-                      ? 'Completed'
-                      : isAllowed
-                        ? 'Mark watched'
-                        : 'Locked (no skip)'}
+                    {isWatched ? 'Completed' : isAllowed ? 'Mark watched' : 'Locked'}
                   </button>
                 </li>
               )
             })}
           </ul>
         </aside>
-      </div>
-
-      <div className="inline-actions">
-        <Link className="pill-btn" to={`/courses/${course.id}/quiz`}>
-          Go to quiz
-        </Link>
-        <Link className="ghost-btn" to={`/courses/${course.id}`}>
-          Course details
-        </Link>
       </div>
     </section>
   )

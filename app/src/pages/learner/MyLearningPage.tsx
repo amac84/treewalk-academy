@@ -19,19 +19,27 @@ export function MyLearningPage() {
   }
 
   return (
-    <section className="page-stack">
-      <header className="page-header">
-        <h1>My Learning</h1>
-        <p>
-          Your CPD transcript stays available for {RETENTION_WINDOW_YEARS} years
-          with downloadable evidence.
+    <section className="page-stack transcript-page">
+      <header className="page-header page-header--split">
+        <div>
+          <p className="section-eyebrow">Learning record</p>
+          <h1>My Learning</h1>
+        </div>
+        <p className="page-subtitle">
+          Your CPD transcript stays available for {RETENTION_WINDOW_YEARS} years with downloadable evidence.
         </p>
       </header>
 
-      <article className="panel">
-        <h2>Transcript (3-year window)</h2>
+      <article className="document-panel">
+        <div className="section-head section-head--stack">
+          <div>
+            <p className="eyebrow">Transcript</p>
+            <h2>Three-year CPD window</h2>
+          </div>
+          <p className="section-copy">A defensible record of completed learning and certificate evidence.</p>
+        </div>
         {transcriptForCurrentUser.length ? (
-          <div className="table-wrap">
+          <div className="table-wrap transcript-table-wrap">
             <table>
               <thead>
                 <tr>
@@ -73,12 +81,13 @@ export function MyLearningPage() {
         )}
       </article>
 
-      <article className="panel row-space-between">
+      <article className="document-panel document-panel--action">
         <div>
-          <h2>CPD Export</h2>
-          <p>Generate a CSV export for your internal CPD records.</p>
+          <p className="eyebrow">Export</p>
+          <h2>Take a copy for internal records</h2>
+          <p className="section-copy">Generate a CSV snapshot for your employer, regulator, or compliance file.</p>
         </div>
-        <button type="button" className="btn btn-outline">
+        <button type="button" className="button button--secondary">
           Export CSV
         </button>
       </article>

@@ -105,7 +105,6 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     if (!getSupabaseBrowserClient()) {
-      setCoursesSyncStatus('local_only')
       return
     }
 
