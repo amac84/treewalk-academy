@@ -37,13 +37,25 @@ export function CoursesPage() {
   }, [publishedCourses, topic, level, search])
 
   return (
-    <section>
-      <header className="panel">
-        <div className="section-header">
-          <h2>Courses Marketplace</h2>
-          <p>Card-first discovery with focused filters to keep momentum high.</p>
+    <section className="page-stack courses-page">
+      <header className="page-header page-header--split">
+        <div>
+          <p className="section-eyebrow">Course marketplace</p>
+          <h1>Choose the next hour that advances your CPD record.</h1>
+          <p className="page-subtitle">
+            Filters stay available, but the catalog should do most of the talking through topic,
+            level, and earned time.
+          </p>
         </div>
-        <div className="filters">
+        <p className="page-kicker">{filteredCourses.length} courses match your current view.</p>
+      </header>
+
+      <section className="filters filters--quiet">
+        <div className="filters-intro">
+          <h2>Refine the field</h2>
+          <p className="section-copy">Use only the filters you need, then return to the titles.</p>
+        </div>
+        <div className="filters-grid">
           <label>
             Search
             <input
@@ -82,14 +94,14 @@ export function CoursesPage() {
             </select>
           </label>
         </div>
-      </header>
+      </section>
 
       <div className="course-grid">
         {filteredCourses.map((course) => (
           <CourseCard key={course.id} course={course} />
         ))}
         {filteredCourses.length === 0 ? (
-          <article className="panel empty-state">
+          <article className="empty-state course-empty-state">
             <h3>No courses match your filters</h3>
             <p>Try clearing one filter to keep your momentum.</p>
           </article>

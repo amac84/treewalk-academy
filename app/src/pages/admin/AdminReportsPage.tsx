@@ -42,64 +42,131 @@ export function AdminReportsPage() {
   }, [enrollments, courses, users])
 
   return (
-    <section className="page">
+    <section className="page page--admin">
       <header className="page-header">
+        <p className="section-eyebrow">Admin · Reporting</p>
         <h1>Reporting</h1>
-        <p>Operational reporting focused on completion defensibility and learner momentum.</p>
+        <p className="page-subtitle">
+          Operational reporting focused on completion defensibility and learner momentum.
+        </p>
       </header>
 
-      <div className="admin-grid">
-        <article className="admin-card">
-          <h2>Usage Snapshot</h2>
-          <ul>
-            <li>Total users: {users.length}</li>
-            <li>Active enrollments: {enrollments.length}</li>
-            <li>Total completions: {completions.length}</li>
-            <li>Total courses: {courses.length}</li>
-          </ul>
+      <section className="admin-ledger">
+        <article className="admin-snapshot">
+          <div className="admin-snapshot__lead">
+            <p className="section-eyebrow">Snapshot</p>
+            <h2>Usage</h2>
+          </div>
+          <dl className="admin-definition-list">
+            <div>
+              <dt>Total users</dt>
+              <dd>{users.length}</dd>
+            </div>
+            <div>
+              <dt>Active enrollments</dt>
+              <dd>{enrollments.length}</dd>
+            </div>
+            <div>
+              <dt>Total completions</dt>
+              <dd>{completions.length}</dd>
+            </div>
+            <div>
+              <dt>Total courses</dt>
+              <dd>{courses.length}</dd>
+            </div>
+          </dl>
         </article>
 
-        <article className="admin-card">
-          <h2>Compliance Snapshot</h2>
-          <ul>
-            <li>CPD ledger entries: {cpdLedger.length}</li>
-            <li>Total CPD hours awarded: {cpdLedger.reduce((sum, row) => sum + row.hoursAwarded, 0).toFixed(2)}</li>
-            <li>Certificates issued: {completions.length}</li>
-          </ul>
+        <article className="admin-snapshot">
+          <div className="admin-snapshot__lead">
+            <p className="section-eyebrow">Compliance</p>
+            <h2>Evidence</h2>
+          </div>
+          <dl className="admin-definition-list">
+            <div>
+              <dt>CPD ledger entries</dt>
+              <dd>{cpdLedger.length}</dd>
+            </div>
+            <div>
+              <dt>Hours awarded</dt>
+              <dd>{cpdLedger.reduce((sum, row) => sum + row.hoursAwarded, 0).toFixed(2)}</dd>
+            </div>
+            <div>
+              <dt>Certificates issued</dt>
+              <dd>{completions.length}</dd>
+            </div>
+          </dl>
         </article>
 
-        <article className="admin-card">
-          <h2>Webinar Snapshot</h2>
-          <ul>
-            <li>Total webinars: {webinars.length}</li>
-            <li>Attendance records: {webinarAttendances.length}</li>
-            <li>Converted to courses: {webinars.filter((webinar) => webinar.convertedCourseId).length}</li>
-          </ul>
+        <article className="admin-snapshot">
+          <div className="admin-snapshot__lead">
+            <p className="section-eyebrow">Webinars</p>
+            <h2>Live pipeline</h2>
+          </div>
+          <dl className="admin-definition-list">
+            <div>
+              <dt>Total webinars</dt>
+              <dd>{webinars.length}</dd>
+            </div>
+            <div>
+              <dt>Attendance records</dt>
+              <dd>{webinarAttendances.length}</dd>
+            </div>
+            <div>
+              <dt>Converted to courses</dt>
+              <dd>{webinars.filter((webinar) => webinar.convertedCourseId).length}</dd>
+            </div>
+          </dl>
         </article>
+      </section>
 
-        <article className="admin-card admin-card-wide">
-          <h2>Course Completion Rates</h2>
-          <ul>
+      <section className="admin-analysis-grid">
+        <article className="admin-analysis">
+          <header className="admin-analysis__header">
+            <div>
+              <p className="section-eyebrow">Course performance</p>
+              <h2>Completion rates</h2>
+            </div>
+          </header>
+          <ul className="admin-report-list">
             {completionByCourse.map((item) => (
               <li key={item.courseId}>
-                <strong>{item.title}</strong> — {item.completionRate}% ({item.completedCount}/{item.enrollmentCount})
+                <div>
+                  <strong>{item.title}</strong>
+                  <p className="meta-line">
+                    {item.completedCount}/{item.enrollmentCount} learners completed
+                  </p>
+                </div>
+                <span className="admin-emphasis">{item.completionRate}%</span>
               </li>
             ))}
           </ul>
         </article>
 
-        <article className="admin-card admin-card-wide">
-          <h2>Learner Progress QA View</h2>
-          <ul>
+        <article className="admin-analysis">
+          <header className="admin-analysis__header">
+            <div>
+              <p className="section-eyebrow">QA view</p>
+              <h2>Learner progress</h2>
+            </div>
+          </header>
+          <ul className="admin-report-list">
             {progressRows.map((row) => (
               <li key={row.id}>
-                <strong>{row.learnerName}</strong> • {row.courseTitle} — watched {row.watchedPercent}% • attempts{' '}
-                {row.totalAttempts} • latest score {row.latestScore ?? 'N/A'}%
+                <div>
+                  <strong>{row.learnerName}</strong>
+                  <p className="meta-line">{row.courseTitle}</p>
+                </div>
+                <div className="admin-report-list__meta">
+                  <span>{row.watchedPercent}% watched</span>
+                  <span>{row.totalAttempts} attempts</span>
+                  <span>{row.latestScore ?? 'N/A'}% latest</span>
+                </div>
               </li>
             ))}
           </ul>
         </article>
-      </div>
+      </section>
     </section>
   )
 }

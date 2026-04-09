@@ -25,7 +25,7 @@ export function AdminCoursesPage() {
   }, [store.courses, store.currentUserRole, store.currentUserId])
 
   return (
-    <section className="page">
+    <section className="page page-admin page-admin-courses">
       <div className="page-header">
         <div>
           <p className="section-eyebrow">Admin · Course workflow</p>
@@ -38,21 +38,27 @@ export function AdminCoursesPage() {
 
       {error ? <p className="inline-error">{error}</p> : null}
 
-      <div className="workflow-grid">
+      <div className="workflow-board">
         {ORDERED_STATUSES.map((status) => {
           const bucket = editableCourses.filter((course) => course.status === status)
           return (
-            <section key={status} className="workflow-column">
-              <h2>{COURSE_STATUS_LABELS[status]}</h2>
-              <p>{bucket.length} course(s)</p>
+            <section key={status} className="workflow-lane">
+              <header className="workflow-lane__head">
+                <div>
+                  <h2>{COURSE_STATUS_LABELS[status]}</h2>
+                  <p className="muted">{bucket.length} course(s)</p>
+                </div>
+              </header>
               <div className="workflow-list">
                 {bucket.map((course) => (
                   <article key={course.id} className="workflow-card">
-                    <h3>{course.title}</h3>
-                    <p>{course.summary}</p>
-                    <p className="meta-line">
-                      CPD: {(course.cpdHoursOverride ?? calculateCPDHours(course.videoMinutes)).toFixed(2)}h
-                    </p>
+                    <div className="stack-sm">
+                      <h3>{course.title}</h3>
+                      <p className="muted">{course.summary}</p>
+                      <p className="meta-line">
+                        CPD: {(course.cpdHoursOverride ?? calculateCPDHours(course.videoMinutes)).toFixed(2)}h
+                      </p>
+                    </div>
                     <div className="button-row">
                       {status !== 'draft' ? (
                         <button
@@ -80,7 +86,7 @@ export function AdminCoursesPage() {
                         </button>
                       ) : null}
                     </div>
-                    <Link to={`/courses/${course.id}`}>Preview learner view</Link>
+                    <Link className="link-button" to={`/courses/${course.id}`}>Preview learner view</Link>
                     <details className="mux-course-details stack-sm">
                       <summary className="mux-details-summary">Mux video (per segment)</summary>
                       <p className="muted small-copy">

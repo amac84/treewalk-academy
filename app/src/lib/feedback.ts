@@ -126,8 +126,6 @@ export async function submitFeedback(payload: FeedbackSubmission): Promise<Feedb
   const rawResult = parseFeedbackJson(text)
 
   if (import.meta.env.DEV) {
-    // Helps debug 404 HTML / wrong endpoint without exposing details in production UI
-    // eslint-disable-next-line no-console
     console.debug('[feedback]', response.status, endpoint, rawResult ?? text.slice(0, 200))
   }
 

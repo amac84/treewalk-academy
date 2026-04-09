@@ -20,36 +20,82 @@ export function AdminDashboardPage() {
   }, [store.courses, store.users, store.certificates.length])
 
   return (
-    <div className="page admin-dashboard-page">
-      <header className="page-header">
-        <h1>Admin Dashboard</h1>
-        <p>Operational metrics and controls for Treewalk Academy.</p>
+    <div className="page admin-page admin-dashboard-page">
+      <header className="page-header admin-page-header">
+        <div>
+          <p className="section-eyebrow">Operations</p>
+          <h1>Today’s operating view</h1>
+        </div>
+        <p className="page-subtitle">
+          Keep the catalog moving, keep users active, and keep completion records defensible.
+        </p>
       </header>
 
-      <section className="stats-grid">
-        <article className="stat-card">
-          <h3>Published Courses</h3>
-          <strong>{metrics.published}</strong>
+      <section className="admin-overview-grid">
+        <article className="admin-hero-block">
+          <p className="section-eyebrow">Catalog health</p>
+          <h2>{metrics.published} published courses</h2>
+          <p className="section-copy">
+            {metrics.inReview} in review and {metrics.drafts} still in draft. Editorial throughput matters
+            more than dashboard ornament.
+          </p>
         </article>
-        <article className="stat-card">
-          <h3>In Review</h3>
-          <strong>{metrics.inReview}</strong>
+
+        <div className="admin-summary-rail">
+          <article className="admin-summary-item">
+            <span className="admin-summary-value">{metrics.activeUsers}</span>
+            <span className="admin-summary-label">active users</span>
+          </article>
+          <article className="admin-summary-item">
+            <span className="admin-summary-value">{metrics.certificates}</span>
+            <span className="admin-summary-label">certificates issued</span>
+          </article>
+          <article className="admin-summary-item">
+            <span className="admin-summary-value">{metrics.totalCPD.toFixed(2)}</span>
+            <span className="admin-summary-label">catalog CPD hours</span>
+          </article>
+        </div>
+      </section>
+
+      <section className="admin-ledger-grid">
+        <article className="admin-ledger-panel">
+          <div className="section-head">
+            <h2>Workflow priorities</h2>
+          </div>
+          <ul className="admin-ledger-list">
+            <li>
+              <span>Courses waiting in review</span>
+              <strong>{metrics.inReview}</strong>
+            </li>
+            <li>
+              <span>Drafts still needing editorial work</span>
+              <strong>{metrics.drafts}</strong>
+            </li>
+            <li>
+              <span>Published catalog available today</span>
+              <strong>{metrics.published}</strong>
+            </li>
+          </ul>
         </article>
-        <article className="stat-card">
-          <h3>Draft Courses</h3>
-          <strong>{metrics.drafts}</strong>
-        </article>
-        <article className="stat-card">
-          <h3>Active Users</h3>
-          <strong>{metrics.activeUsers}</strong>
-        </article>
-        <article className="stat-card">
-          <h3>Certificates Issued</h3>
-          <strong>{metrics.certificates}</strong>
-        </article>
-        <article className="stat-card">
-          <h3>Total CPD (Catalog)</h3>
-          <strong>{metrics.totalCPD.toFixed(2)} hrs</strong>
+
+        <article className="admin-ledger-panel">
+          <div className="section-head">
+            <h2>Compliance signals</h2>
+          </div>
+          <ul className="admin-ledger-list">
+            <li>
+              <span>Certificates in the system</span>
+              <strong>{metrics.certificates}</strong>
+            </li>
+            <li>
+              <span>Users currently active</span>
+              <strong>{metrics.activeUsers}</strong>
+            </li>
+            <li>
+              <span>Total CPD represented in catalog</span>
+              <strong>{metrics.totalCPD.toFixed(2)}h</strong>
+            </li>
+          </ul>
         </article>
       </section>
     </div>

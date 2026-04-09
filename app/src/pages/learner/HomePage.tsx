@@ -37,46 +37,104 @@ export function HomePage() {
     return total + calculateCPDHours(course.videoMinutes)
   }, 0)
 
+  const totalCertificates = userEnrollments.filter((entry) => entry.certificateId).length
+
+  const featuredCourse = continueLearning[0]
+  const supportingContinue = continueLearning.slice(1)
+
   return (
-    <main className="page">
-      <header className="page-header">
+    <main className="page page--home">
+      <header className="page-header page-header--hero">
+        <p className="section-eyebrow">Learner workspace</p>
         <h1>Welcome back{currentUser ? `, ${currentUser.name}` : ''}</h1>
-        <p className="page-subtitle">Keep momentum this week. Resume in one click and maintain your CPD progress.</p>
+        <p className="page-subtitle">
+          Keep momentum high. Your next meaningful step should be obvious, and your CPD record stays quietly in view.
+        </p>
       </header>
 
-      <section className="section-grid four-up">
-        <article className="metric-card">
-          <h2>CPD snapshot</h2>
-          <p className="metric-value">{formatCpdHours(cpdHours)}</p>
-          <p className="muted">Rolling 3-year transcript ready</p>
+      <section className="hero-grid">
+        <article className="hero-feature">
+          <div className="hero-feature__header">
+            <p className="eyebrow">Primary focus</p>
+            <h2>Continue learning</h2>
+          </div>
+
+          {featuredCourse ? (
+            <div className="hero-feature__body">
+              <div className="stack-sm">
+                <h3>{featuredCourse.course.title}</h3>
+                <p className="section-copy">{featuredCourse.course.description}</p>
+              </div>
+              <dl className="definition-grid">
+                <div>
+                  <dt>Watched</dt>
+                  <dd>{featuredCourse.readiness.watchedPercent}%</dd>
+                </div>
+                <div>
+                  <dt>Quiz</dt>
+                  <dd>{featuredCourse.readiness.quizPassed ? 'Passed' : 'Pending'}</dd>
+                </div>
+                <div>
+                  <dt>CPD on finish</dt>
+                  <dd>{formatCpdHours(calculateCPDHours(featuredCourse.course.videoMinutes))}</dd>
+                </div>
+              </dl>
+              <div className="button-row">
+                <Link className="button button--primary" to={`/courses/${featuredCourse.course.id}/player`}>
+                  Resume course
+                </Link>
+                <Link className="button button--subtle" to={`/courses/${featuredCourse.course.id}`}>
+                  Review details
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <div className="hero-feature__body">
+              <p className="section-copy">
+                You are caught up. Open the catalog and start a new course while your transcript remains ready.
+              </p>
+              <div className="button-row">
+                <Link className="button button--primary" to="/courses">
+                  Browse courses
+                </Link>
+              </div>
+            </div>
+          )}
         </article>
-        <article className="metric-card">
-          <h2>In progress</h2>
-          <p className="metric-value">{continueLearning.length}</p>
-          <p className="muted">Courses not yet complete</p>
-        </article>
-        <article className="metric-card">
-          <h2>Upcoming webinars</h2>
-          <p className="metric-value">{upcomingWebinars.length}</p>
-          <p className="muted">Live sessions this cycle</p>
-        </article>
-        <article className="metric-card">
-          <h2>Certificates</h2>
-          <p className="metric-value">{userEnrollments.filter((entry) => entry.certificateId).length}</p>
-          <p className="muted">Always downloadable</p>
-        </article>
+
+        <aside className="hero-rail">
+          <div className="hero-aside">
+            <p className="eyebrow">Record</p>
+            <div className="metric-pair">
+              <span>{formatCpdHours(cpdHours)}</span>
+              <p>Earned across the rolling 3-year transcript.</p>
+            </div>
+          </div>
+          <div className="hero-aside">
+            <p className="eyebrow">In motion</p>
+            <div className="metric-pair">
+              <span>{continueLearning.length}</span>
+              <p>Active courses still in progress.</p>
+            </div>
+          </div>
+          <div className="hero-aside">
+            <p className="eyebrow">This cycle</p>
+            <div className="metric-pair">
+              <span>{upcomingWebinars.length}</span>
+              <p>Upcoming live sessions plus {totalCertificates} certificates ready to download.</p>
+            </div>
+          </div>
+        </aside>
       </section>
 
-      <section className="section-block">
-        <div className="section-head">
-          <h2>Continue learning</h2>
-          <Link to="/courses">View all courses</Link>
-        </div>
-        {continueLearning.length === 0 ? (
-          <p className="empty-state">You are all caught up. Browse the marketplace to enroll in a new course.</p>
-        ) : (
+      {supportingContinue.length > 0 ? (
+        <section className="section-block">
+          <div className="section-head">
+            <h2>Also underway</h2>
+            <Link to="/courses">View all courses</Link>
+          </div>
           <div className="course-list">
-            {continueLearning.map(({ course, readiness }) => (
+            {supportingContinue.map(({ course, readiness }) => (
               <article key={course.id} className="course-row">
                 <div>
                   <h3>{course.title}</h3>
@@ -90,10 +148,10 @@ export function HomePage() {
               </article>
             ))}
           </div>
-        )}
-      </section>
+        </section>
+      ) : null}
 
-      <section className="section-block">
+      <section className="section-block section-block--split">
         <div className="section-head">
           <h2>Recommended courses</h2>
           <Link to="/courses">Explore marketplace</Link>
@@ -111,7 +169,7 @@ export function HomePage() {
         </div>
       </section>
 
-      <section className="section-block">
+      <section className="section-block section-block--split">
         <div className="section-head">
           <h2>Upcoming webinars</h2>
           <Link to="/webinars">See all webinars</Link>

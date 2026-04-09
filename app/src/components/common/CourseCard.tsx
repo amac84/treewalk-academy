@@ -10,21 +10,20 @@ export function CourseCard({ course }: CourseCardProps) {
   const cpdHours = calculateCpdHours(course.videoMinutes)
 
   return (
-    <article className="card">
-      <div className="card__header">
+    <article className="course-card">
+      <div className="course-card__header">
         <p className="eyebrow">{course.category}</p>
-        <span className={`pill pill--status-${course.status.toLowerCase()}`}>
-          {course.status}
-        </span>
+        <span className="course-card__level">{course.level}</span>
       </div>
       <h3>{course.title}</h3>
+      <p className="course-card__summary">{course.summary}</p>
       <p className="muted">{course.description}</p>
-      <div className="card__footer">
-        <span>{course.videoMinutes} mins</span>
+      <div className="course-card__footer">
+        <span>{course.videoMinutes} mins on demand</span>
         <span>{cpdHours.toFixed(2)} CPD</span>
       </div>
-      <Link className="button button--secondary card__cta" to={`/courses/${course.id}`}>
-        View course
+      <Link className="text-link course-card__cta" to={`/courses/${course.id}`}>
+        Open course
       </Link>
     </article>
   )
@@ -32,7 +31,7 @@ export function CourseCard({ course }: CourseCardProps) {
 
 export function CompletionBadge({ completed }: { completed: boolean }) {
   return (
-    <span className={`pill ${completed ? 'pill--success' : 'pill--warning'}`}>
+    <span className={`progress-pill ${completed ? 'progress-pill--complete' : 'progress-pill--pending'}`}>
       {completed ? 'Completed' : 'In Progress'}
     </span>
   )

@@ -20,7 +20,7 @@ export function QuizPage() {
 
   if (!course || !currentQuestion) {
     return (
-      <section className="panel">
+      <section className="empty-state">
         <h1>Course quiz not found</h1>
         <Link to="/courses">Back to courses</Link>
       </section>
@@ -29,7 +29,7 @@ export function QuizPage() {
 
   if (!enrollment) {
     return (
-      <section className="panel">
+      <section className="empty-state">
         <h1>Enroll before attempting quiz</h1>
         <Link to={`/courses/${course.id}`}>Go to course details</Link>
       </section>
@@ -40,18 +40,19 @@ export function QuizPage() {
   const selected = answers[currentQuestion.id]
 
   return (
-    <section className="page">
-      <header className="page-header">
+    <section className="page-stack quiz-page">
+      <header className="page-header page-header--split">
         <h1>{course.title}</h1>
-        <p>
+        <p className="page-subtitle">
           One question at a time. Pass threshold: {REQUIRED_PASSING_SCORE}%. Retakes are unlimited.
         </p>
       </header>
 
-      <article className="panel">
-        <p className="muted">
-          Question {currentIndex + 1} of {course.quiz.length}
-        </p>
+      <article className="quiz-shell">
+        <div className="quiz-progress">
+          <p className="eyebrow">Question {currentIndex + 1}</p>
+          <p className="muted">of {course.quiz.length}</p>
+        </div>
         <h2>{currentQuestion.prompt}</h2>
         <div className="quiz-options">
           {currentQuestion.options.map((option) => (
@@ -110,7 +111,7 @@ export function QuizPage() {
         {resultMessage ? <p className="muted">{resultMessage}</p> : null}
       </article>
 
-      <article className="panel">
+      <article className="quiz-history">
         <h2>Attempt history</h2>
         {enrollment.quizAttempts.length === 0 ? (
           <p className="muted">No attempts recorded yet.</p>
