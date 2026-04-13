@@ -11,7 +11,7 @@ export function CourseSyncBanner() {
   if (coursesSyncStatus === 'loading') {
     return (
       <div className="sync-banner sync-banner--loading" role="status">
-        <span>Loading shared courses from Supabase…</span>
+        <span>Loading shared courses…</span>
       </div>
     )
   }
@@ -41,10 +41,10 @@ export function CourseSyncBanner() {
   return (
     <div className="sync-banner sync-banner--ok" role="status">
       <div className="sync-banner__stack">
-        <span>Courses and Mux playback IDs are saved to Supabase — shared for your pilot reviewers.</span>
+        <span>Courses, lesson videos, and quiz banks are saved online — your pilot reviewers see the same catalog.</span>
         <span className="sync-banner__subtle">
-          Learners, enrollments, completions, and transcripts are still{' '}
-          <strong>in-memory demo data</strong> in this build — they are not persisted per real user yet.
+          Learner progress, completions, certificates, transcripts, and playback activity are now synced to Supabase
+          for continuity and evidence reporting.
         </span>
       </div>
     </div>

@@ -110,13 +110,8 @@ const mockCourses: Course[] = [
     instructorId: 'u-instructor-1',
     status: 'published',
     videoMinutes: 96,
-    segments: [
-      { id: 'seg-ethics-1', title: 'Bias traps in evidence review', durationMinutes: 16, order: 1 },
-      { id: 'seg-ethics-2', title: 'Escalation and documentation', durationMinutes: 18, order: 2 },
-      { id: 'seg-ethics-3', title: 'Threat categories refresher', durationMinutes: 20, order: 3 },
-      { id: 'seg-ethics-4', title: 'Safeguard design workshop', durationMinutes: 22, order: 4 },
-      { id: 'seg-ethics-5', title: 'Case workshop', durationMinutes: 20, order: 5 },
-    ],
+    muxStatus: 'idle',
+    transcriptStatus: 'idle',
     quiz: [
       {
         id: 'q-ethics-1',
@@ -156,12 +151,8 @@ const mockCourses: Course[] = [
     instructorId: 'u-instructor-1',
     status: 'published',
     videoMinutes: 72,
-    segments: [
-      { id: 'seg-tax-1', title: 'Legislative highlights', durationMinutes: 18, order: 1 },
-      { id: 'seg-tax-2', title: 'Agency guidance changes', durationMinutes: 15, order: 2 },
-      { id: 'seg-tax-3', title: 'Client communication updates', durationMinutes: 19, order: 3 },
-      { id: 'seg-tax-4', title: 'Worked examples', durationMinutes: 20, order: 4 },
-    ],
+    muxStatus: 'idle',
+    transcriptStatus: 'idle',
     quiz: [
       {
         id: 'q-tax-1',
@@ -191,12 +182,8 @@ const mockCourses: Course[] = [
     instructorId: 'u-instructor-1',
     status: 'review',
     videoMinutes: 58,
-    segments: [
-      { id: 'seg-ai-1', title: 'Control objectives', durationMinutes: 15, order: 1 },
-      { id: 'seg-ai-2', title: 'Responsibility matrix', durationMinutes: 13, order: 2 },
-      { id: 'seg-ai-3', title: 'Monitoring loops', durationMinutes: 14, order: 3 },
-      { id: 'seg-ai-4', title: 'Evidence packs', durationMinutes: 16, order: 4 },
-    ],
+    muxStatus: 'idle',
+    transcriptStatus: 'idle',
     quiz: [
       {
         id: 'q-ai-1',
@@ -225,12 +212,8 @@ const mockCourses: Course[] = [
     instructorId: 'u-instructor-1',
     status: 'draft',
     videoMinutes: 44,
-    segments: [
-      { id: 'seg-adv-1', title: 'Decision-first framing', durationMinutes: 12, order: 1 },
-      { id: 'seg-adv-2', title: 'Tradeoff language', durationMinutes: 11, order: 2 },
-      { id: 'seg-adv-3', title: 'Board-ready visuals', durationMinutes: 10, order: 3 },
-      { id: 'seg-adv-4', title: 'Action-oriented close', durationMinutes: 11, order: 4 },
-    ],
+    muxStatus: 'idle',
+    transcriptStatus: 'idle',
     quiz: [
       {
         id: 'q-adv-1',
@@ -255,8 +238,17 @@ const mockEnrollments: Enrollment[] = [
     userId: 'u-learner-1',
     courseId: 'course-ethics-2026',
     enrolledAt: isoDaysAgo(14),
-    watchedSegmentIds: ['seg-ethics-1', 'seg-ethics-2', 'seg-ethics-3'],
     watchedMinutes: 54,
+    videoProgress: {
+      durationSeconds: 5760,
+      watchedSeconds: 3240,
+      furthestSecond: 3240,
+      lastPositionSecond: 3240,
+      completed: false,
+      pausedCount: 2,
+      resumedCount: 2,
+      seekViolations: 0,
+    },
     quizAttempts: [],
   },
   {
@@ -266,8 +258,17 @@ const mockEnrollments: Enrollment[] = [
     enrolledAt: isoDaysAgo(11),
     completedAt: isoDaysAgo(7),
     certificateId: 'cert-u-learner-2-course-tax-updates',
-    watchedSegmentIds: ['seg-tax-1', 'seg-tax-2', 'seg-tax-3', 'seg-tax-4'],
     watchedMinutes: 72,
+    videoProgress: {
+      durationSeconds: 4320,
+      watchedSeconds: 4320,
+      furthestSecond: 4320,
+      lastPositionSecond: 4320,
+      completed: true,
+      pausedCount: 1,
+      resumedCount: 1,
+      seekViolations: 0,
+    },
     quizAttempts: [],
   },
 ]
@@ -324,6 +325,12 @@ export const mockInitialState: AppState = {
       courseId: 'course-tax-updates',
       verificationCode: 'TW-CERT-8821',
       issuedAt: isoDaysAgo(7),
+      providerName: 'Treewalk Academy',
+      courseTitle: 'Tax Update Intensive: 2026 Q1',
+      durationHours: calculateCPDHours(72),
+      completionDate: isoDaysAgo(7),
+      quizAttemptId: 'seed-pass-1',
+      passThreshold: 80,
     },
   ],
   webinars: mockWebinars,
@@ -361,8 +368,14 @@ export const mockInitialState: AppState = {
       completedAt: isoDaysAgo(7),
       cpdHours: calculateCPDHours(72),
       certificateId: 'cert-u-learner-2-course-tax-updates',
+      verificationCode: 'TW-CERT-8821',
+      providerName: 'Treewalk Academy',
+      quizAttemptId: 'seed-pass-1',
+      passThreshold: 80,
+      activityWatchedMinutes: 72,
     },
   ],
+  learningActivityLog: [],
 }
 
 /** @alias mockInitialState */

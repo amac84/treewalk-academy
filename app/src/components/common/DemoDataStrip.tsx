@@ -5,7 +5,7 @@ type DemoDataStripProps = {
   bleed?: boolean
 }
 
-/** Shown when Supabase env is missing: everything is in-memory mock seed data. */
+/** Shown when the online catalog is not configured: app runs on local sample data only. */
 export function DemoDataStrip({ bleed }: DemoDataStripProps) {
   const { coursesSyncStatus } = useAppStore()
 
@@ -13,13 +13,17 @@ export function DemoDataStrip({ bleed }: DemoDataStripProps) {
     return null
   }
 
+  const devHint =
+    import.meta.env.DEV &&
+    ' Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in app/.env, run the academy_courses migration, redeploy, and restart the dev server.'
+
   const inner = (
     <div className="sync-banner sync-banner--muted sync-banner--demo-local" role="status">
-      <span className="sync-banner-demo-pill">Demo data</span>
+      <span className="sync-banner-demo-pill">Sample data</span>
       <span>
-        Users, enrollments, progress, and courses are <strong>mock seed data</strong> in this browser only.
-        Add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>, run the <code>academy_courses</code>{' '}
-        migration, and deploy so the shared catalog and Mux videos persist for your pilot.
+        Users, enrollments, progress, and courses here are <strong>sample data in this browser only</strong> — nothing
+        is shared with your team until the site is connected to your organization&apos;s database.
+        {devHint}
       </span>
     </div>
   )

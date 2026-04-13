@@ -2,7 +2,7 @@ import { Link, useParams } from 'react-router-dom'
 import { CompletionBadge } from '../../components/common/CourseCard'
 import { REQUIRED_PASSING_SCORE } from '../../constants'
 import { useAppStore } from '../../hooks/useAppStore'
-import { calculateCPDHours } from '../../lib/cpd'
+import { getCourseCPDHours } from '../../lib/cpd'
 import { getWatchedPercentFromEnrollment } from '../../lib/courseLogic'
 
 export function CourseDetailPage() {
@@ -34,7 +34,7 @@ export function CourseDetailPage() {
             <span>{course.category}</span>
             <span>{course.level}</span>
             <span>{course.videoMinutes} min</span>
-            <span>{calculateCPDHours(course.videoMinutes).toFixed(2)} CPD</span>
+            <span>{getCourseCPDHours(course).toFixed(2)} CPD</span>
           </div>
         </div>
 
@@ -65,9 +65,15 @@ export function CourseDetailPage() {
               <Link className="button" to={`/courses/${course.id}/player`}>
                 Resume learning
               </Link>
-              <Link className="button button--secondary" to={`/courses/${course.id}/quiz`}>
-                Open quiz
-              </Link>
+              {watchedPercent >= 100 ? (
+                <Link className="button button--secondary" to={`/courses/${course.id}/quiz`}>
+                  Open quiz
+                </Link>
+              ) : (
+                <button type="button" className="button button--secondary" disabled>
+                  Quiz unlocks at 100% watched
+                </button>
+              )}
             </div>
           </aside>
         )}
@@ -77,23 +83,18 @@ export function CourseDetailPage() {
         <article className="detail-outline">
           <div className="section-head">
             <div>
-              <p className="section-eyebrow">Outline</p>
-              <h2>Course sequence</h2>
+              <p className="section-eyebrow">Video</p>
+              <h2>Lesson overview</h2>
             </div>
           </div>
           <ol className="outline-list">
-            {course.segments
-              .slice()
-              .sort((a, b) => a.order - b.order)
-              .map((segment) => (
-                <li key={segment.id} className="outline-item">
-                  <span className="outline-index">{segment.order}</span>
-                  <div>
-                    <h3>{segment.title}</h3>
-                    <p className="muted">{segment.durationMinutes} min segment</p>
-                  </div>
-                </li>
-              ))}
+            <li className="outline-item">
+              <span className="outline-index">1</span>
+              <div>
+                <h3>Main lesson video</h3>
+                <p className="muted">{course.videoMinutes} min</p>
+              </div>
+            </li>
           </ol>
         </article>
 
@@ -102,7 +103,7 @@ export function CourseDetailPage() {
             <p className="section-eyebrow">Assessment</p>
             <h2>Quiz attempts</h2>
             {enrollment.quizAttempts.length === 0 ? (
-              <p className="muted">No attempts yet. Finish the video path, then complete the assessment.</p>
+              <p className="muted">No attempts yet. Finish the video, then complete the assessment.</p>
             ) : (
               <ul className="simple-list detail-attempt-list">
                 {enrollment.quizAttempts.map((attempt) => (
@@ -122,7 +123,7 @@ export function CourseDetailPage() {
             <p className="section-eyebrow">Completion rule</p>
             <h2>What counts as complete</h2>
             <p>
-              Completion requires the full video path plus a passing quiz result. Progress stays recorded for
+              Completion requires the full video plus a passing quiz result. Progress stays recorded for
               your CPD evidence trail.
             </p>
           </article>

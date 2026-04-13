@@ -1,13 +1,13 @@
 import { Link } from 'react-router-dom'
 import type { Course } from '../../types'
-import { calculateCpdHours } from '../../lib/cpd'
+import { getCourseCPDHours } from '../../lib/cpd'
 
 type CourseCardProps = {
   course: Course
 }
 
 export function CourseCard({ course }: CourseCardProps) {
-  const cpdHours = calculateCpdHours(course.videoMinutes)
+  const cpdHours = getCourseCPDHours(course)
 
   return (
     <article className="course-card">

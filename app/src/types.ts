@@ -41,23 +41,20 @@ export interface Invite {
   acceptedAt?: string
 }
 
-export type MuxSegmentStatus = 'idle' | 'uploading' | 'processing' | 'ready' | 'error'
-export type SegmentTranscriptStatus = 'idle' | 'processing' | 'ready' | 'error'
+export type MuxVideoStatus = 'idle' | 'uploading' | 'processing' | 'ready' | 'error'
+export type VideoTranscriptStatus = 'idle' | 'processing' | 'ready' | 'error'
 
-export interface CourseSegment {
-  id: string
-  title: string
-  durationMinutes: number
-  order: number
-  /** Set after a successful Mux direct upload + processing */
-  muxUploadId?: string
-  muxAssetId?: string
-  muxPlaybackId?: string
-  muxStatus?: MuxSegmentStatus
-  muxErrorMessage?: string
-  transcriptText?: string
-  transcriptStatus?: SegmentTranscriptStatus
-  transcriptErrorMessage?: string
+export interface SegmentTranscriptCue {
+  startSeconds?: number
+  endSeconds?: number
+  text: string
+}
+
+export interface SegmentTranscriptData {
+  sourceText: string
+  plainText: string
+  segments: SegmentTranscriptCue[]
+  downloadVersion: number
 }
 
 export interface QuizOption {
@@ -66,10 +63,35 @@ export interface QuizOption {
   isCorrect: boolean
 }
 
+export type QuizDifficulty = 'easy' | 'medium' | 'hard'
+
 export interface QuizQuestion {
   id: string
   prompt: string
   options: QuizOption[]
+  explanation?: string
+  difficulty?: QuizDifficulty
+}
+
+export interface QuizPolicy {
+  passThreshold: number
+  shownQuestionCount: number
+  generatedQuestionCount: number
+  minutesBasis: number
+  generatedAt: string
+  sourceModel?: string
+}
+
+export interface VideoWatchProgress {
+  durationSeconds: number
+  watchedSeconds: number
+  furthestSecond: number
+  lastPositionSecond: number
+  completed: boolean
+  pausedCount: number
+  resumedCount: number
+  seekViolations: number
+  lastUpdatedAt?: string
 }
 
 export interface Course {
@@ -83,13 +105,23 @@ export interface Course {
   instructorId: string
   status: CourseStatus
   videoMinutes: number
+  /** Set after a successful direct video upload + processing. */
+  muxUploadId?: string
+  muxAssetId?: string
+  muxPlaybackId?: string
+  muxStatus?: MuxVideoStatus
+  muxErrorMessage?: string
+  transcript?: SegmentTranscriptData
+  transcriptText?: string
+  transcriptStatus?: VideoTranscriptStatus
+  transcriptErrorMessage?: string
   cpdHoursOverride?: number | null
   version: number
   createdAt: string
   updatedAt: string
   publishedAt?: string
-  segments: CourseSegment[]
   quiz: QuizQuestion[]
+  quizPolicy?: QuizPolicy
 }
 
 export interface QuizAttempt {
@@ -101,6 +133,10 @@ export interface QuizAttempt {
   passed: boolean
   submittedAt: string
   attemptNumber: number
+  passThreshold: number
+  renderedQuestions: QuizQuestion[]
+  generatedQuestionCount: number
+  shownQuestionCount: number
 }
 
 export interface Enrollment {
@@ -110,15 +146,14 @@ export interface Enrollment {
   enrolledAt: string
   completedAt?: string
   certificateId?: string
-  watchedSegmentIds: string[]
   watchedMinutes: number
+  videoProgress?: VideoWatchProgress
   quizAttempts: QuizAttempt[]
 }
 
 export interface Progress {
   userId: string
   courseId: string
-  watchedSegmentIds: string[]
   watchedMinutes: number
   lastWatchedAt?: string
 }
@@ -129,6 +164,12 @@ export interface Certificate {
   courseId: string
   verificationCode: string
   issuedAt: string
+  providerName: string
+  courseTitle: string
+  durationHours: number
+  completionDate: string
+  quizAttemptId: string
+  passThreshold: number
 }
 
 export interface Completion {
@@ -199,7 +240,6 @@ export interface CourseProgressSummary {
   watchedPercent: number
   watchedMinutes: number
   totalMinutes: number
-  nextUnwatchedSegmentId?: string
 }
 
 export interface WeeklyEngagementSummary {
@@ -215,6 +255,21 @@ export interface TranscriptEntry {
   completedAt: string
   cpdHours: number
   certificateId: string
+  verificationCode: string
+  providerName: string
+  quizAttemptId: string
+  passThreshold: number
+  activityWatchedMinutes: number
+}
+
+export interface LearningActivityEvent {
+  id: string
+  userId: string
+  courseId: string
+  type: 'heartbeat' | 'pause' | 'resume' | 'seek_violation' | 'video_complete'
+  at: string
+  positionSecond: number
+  watchedSeconds: number
 }
 
 export interface AppState {
@@ -230,4 +285,5 @@ export interface AppState {
   webinarAttendances: WebinarAttendance[]
   auditEvents: AuditEvent[]
   transcript: TranscriptEntry[]
+  learningActivityLog: LearningActivityEvent[]
 }

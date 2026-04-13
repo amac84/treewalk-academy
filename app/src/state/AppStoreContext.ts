@@ -3,12 +3,12 @@ import type {
   AppState,
   Course,
   CourseLevel,
-  CourseSegment,
   CoursesSyncStatus,
   CourseStatus,
   CourseTopic,
   Enrollment,
   Invite,
+  QuizPolicy,
   QuizQuestion,
   QuizAttempt,
   User,
@@ -21,6 +21,33 @@ interface ActionResult {
   message?: string
 }
 
+export interface VideoPlaybackUpdateInput {
+  positionSecond: number
+  durationSeconds: number
+  watchedDeltaSeconds: number
+  isPlaying: boolean
+  paused?: boolean
+  resumed?: boolean
+  seekViolation?: boolean
+  completed?: boolean
+}
+
+export type VideoUploadProgress = {
+  loaded: number
+  total: number
+  startedAt: number
+}
+
+export type VideoTranscriptionProgress = {
+  phase: 'extracting_audio' | 'transcribing'
+  extractRatio: number | null
+}
+
+export type VideoProcessingProgress = {
+  upload?: VideoUploadProgress
+  transcription?: VideoTranscriptionProgress
+}
+
 export interface CreateCourseInput {
   title: string
   summary: string
@@ -29,7 +56,7 @@ export interface CreateCourseInput {
   topic: CourseTopic
   level: CourseLevel
   instructorId?: string
-  segments: Array<Pick<CourseSegment, 'title' | 'durationMinutes'>>
+  videoMinutes?: number
   quiz?: QuizQuestion[]
 }
 
@@ -54,29 +81,38 @@ export interface AppStoreContextValue extends AppState {
   acceptInvite: (code: string) => { ok: true; user: User } | { ok: false; error: string }
   suspendUser: (userId: string, suspended?: boolean) => void
   enrollInCourse: (courseId: string) => ActionResult
-  markSegmentWatched: (courseId: string, segmentId: string) => ActionResult
-  submitQuizAttempt: (courseId: string, answers: Record<string, string>) => QuizAttempt | null
-  createCourse: (input: CreateCourseInput) => { ok: true; course: Course } | { ok: false; message: string }
-  addCourseSegment: (
+  markVideoWatched: (courseId: string) => ActionResult
+  recordVideoPlayback: (courseId: string, update: VideoPlaybackUpdateInput) => ActionResult
+  submitQuizAttempt: (
     courseId: string,
-    segment: Pick<CourseSegment, 'title' | 'durationMinutes'>,
+    renderedQuestions: QuizQuestion[],
+    answers: Record<string, string>,
+  ) => QuizAttempt | null
+  updateCourseQuiz: (
+    courseId: string,
+    questionBank: QuizQuestion[],
+    policy: QuizPolicy,
   ) => ActionResult
+  deleteCourseQuizQuestion: (courseId: string, questionId: string) => ActionResult
+  createCourse: (input: CreateCourseInput) => { ok: true; course: Course } | { ok: false; message: string }
   updateCourseDetails: (courseId: string, input: UpdateCourseInput) => ActionResult
+  deleteDraftCourse: (courseId: string) => Promise<ActionResult>
   transitionCourseStatus: (courseId: string, nextStatus: CourseStatus) => ActionResult
-  updateCourseSegmentMux: (
+  updateCourseVideo: (
     courseId: string,
-    segmentId: string,
     mux: Partial<
       Pick<
-        CourseSegment,
+        Course,
         | 'muxUploadId'
         | 'muxAssetId'
         | 'muxPlaybackId'
         | 'muxStatus'
         | 'muxErrorMessage'
+        | 'transcript'
         | 'transcriptText'
         | 'transcriptStatus'
         | 'transcriptErrorMessage'
+        | 'videoMinutes'
       >
     >,
   ) => void
@@ -87,6 +123,16 @@ export interface AppStoreContextValue extends AppState {
   coursesSyncStatus: CoursesSyncStatus
   coursesSyncMessage: string | null
   clearCoursesSyncMessage: () => void
+  videoProcessingProgress: Record<string, VideoProcessingProgress>
+  setVideoUploadProgress: (
+    courseId: string,
+    progress: VideoUploadProgress | null,
+  ) => void
+  setVideoTranscriptionProgress: (
+    courseId: string,
+    progress: VideoTranscriptionProgress | null,
+  ) => void
+  clearVideoProcessingProgress: (courseId: string) => void
 }
 
 export const AppStoreContext = createContext<AppStoreContextValue | undefined>(undefined)
