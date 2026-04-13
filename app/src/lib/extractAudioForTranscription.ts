@@ -1,5 +1,13 @@
 import type { FFmpeg } from '@ffmpeg/ffmpeg'
 
+/** Keep in sync with `package.json` dependency `@ffmpeg/core`. */
+const FFMPEG_CORE_VERSION = '0.12.10'
+/**
+ * Load core from a CDN so the ~31 MiB `.wasm` is not emitted into `dist/`.
+ * Cloudflare Pages rejects static assets larger than 25 MiB.
+ */
+const FFMPEG_CORE_BASE = `https://cdn.jsdelivr.net/npm/@ffmpeg/core@${FFMPEG_CORE_VERSION}/dist/esm`
+
 export type ExtractAudioProgress = { ratio: number }
 
 /** True when we should demux to audio before sending to the transcription API. */
@@ -23,15 +31,11 @@ async function getFFmpeg(): Promise<FFmpeg> {
   }
 
   loadPromise = (async () => {
-    const [{ FFmpeg }, coreMod, wasmMod] = await Promise.all([
-      import('@ffmpeg/ffmpeg'),
-      import('@ffmpeg/core?url'),
-      import('@ffmpeg/core/wasm?url'),
-    ])
+    const { FFmpeg } = await import('@ffmpeg/ffmpeg')
     const ffmpeg = new FFmpeg()
     await ffmpeg.load({
-      coreURL: coreMod.default,
-      wasmURL: wasmMod.default,
+      coreURL: `${FFMPEG_CORE_BASE}/ffmpeg-core.js`,
+      wasmURL: `${FFMPEG_CORE_BASE}/ffmpeg-core.wasm`,
     })
     ffmpegInstance = ffmpeg
     return ffmpeg
