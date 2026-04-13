@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useAppStore } from '../../hooks/useAppStore'
-import { calculateCPDHours, formatCpdHours } from '../../lib/cpd'
+import { formatCpdHours, getCourseCPDHours } from '../../lib/cpd'
 
 export function HomePage() {
   const { currentUser, currentUserId, courses, enrollments, webinars, getCourseReadiness } = useAppStore()
@@ -34,7 +34,7 @@ export function HomePage() {
     if (!enrollment.completedAt) return total
     const course = courses.find((entry) => entry.id === enrollment.courseId)
     if (!course) return total
-    return total + calculateCPDHours(course.videoMinutes)
+    return total + getCourseCPDHours(course)
   }, 0)
 
   const totalCertificates = userEnrollments.filter((entry) => entry.certificateId).length
@@ -76,7 +76,7 @@ export function HomePage() {
                 </div>
                 <div>
                   <dt>CPD on finish</dt>
-                  <dd>{formatCpdHours(calculateCPDHours(featuredCourse.course.videoMinutes))}</dd>
+                  <dd>{formatCpdHours(getCourseCPDHours(featuredCourse.course))}</dd>
                 </div>
               </dl>
               <div className="button-row">
@@ -153,8 +153,7 @@ export function HomePage() {
 
       <section className="section-block section-block--split">
         <div className="section-head">
-          <h2>Recommended courses</h2>
-          <Link to="/courses">Explore marketplace</Link>
+          <h2>Need another next step?</h2>
         </div>
         <div className="card-grid">
           {recommended.map((course) => (
@@ -162,7 +161,7 @@ export function HomePage() {
               <h3>{course.title}</h3>
               <p className="muted">{course.level} · {course.category}</p>
               <p>{course.description}</p>
-              <p className="muted">{formatCpdHours(calculateCPDHours(course.videoMinutes))}</p>
+              <p className="muted">{formatCpdHours(getCourseCPDHours(course))}</p>
               <Link to={`/courses/${course.id}`}>Open course</Link>
             </article>
           ))}

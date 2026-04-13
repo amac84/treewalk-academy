@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "scripts": {
     "build": "npm ci --prefix app && npm run build --prefix app",
-    "deploy:function:feedback": "npx supabase@latest functions deploy create-linear-ticket --no-verify-jwt"
+    "deploy:function:feedback": "npx supabase@latest functions deploy create-linear-ticket --no-verify-jwt",
+    "deploy:function:mux": "npx supabase@latest functions deploy mux"
   }
 }

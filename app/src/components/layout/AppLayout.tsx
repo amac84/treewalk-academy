@@ -1,19 +1,31 @@
 import { Link, NavLink, Outlet } from 'react-router-dom'
 import { CourseSyncBanner } from '../common/CourseSyncBanner'
 import { useCurrentUser, useRoleLabel } from '../../hooks/useAppStore'
+import type { UserRole } from '../../types'
+
+const courseRoles: UserRole[] = ['instructor', 'content_admin', 'super_admin']
+const peopleRoles: UserRole[] = ['hr_admin', 'super_admin']
 
 const learnerNav = [
   { to: '/home', label: 'Home' },
   { to: '/courses', label: 'Courses' },
-  { to: '/my-learning', label: 'My Learning' },
-  { to: '/webinars', label: 'Webinars' },
+  { to: '/my-learning/transcript', label: 'Transcript' },
+  { to: '/my-learning/export', label: 'Export CPD' },
+  { to: '/webinars/upcoming', label: 'Upcoming Webinars' },
+  { to: '/webinars/history', label: 'Webinar History' },
 ]
 
-const adminNav = [
+const adminNav: { to: string; label: string; roles?: UserRole[] }[] = [
   { to: '/admin', label: 'Admin Home' },
-  { to: '/admin/courses', label: 'Admin Courses' },
-  { to: '/admin/users', label: 'Admin Users' },
-  { to: '/admin/reports', label: 'Reporting' },
+  { to: '/admin/courses/new', label: 'Create Draft', roles: courseRoles },
+  { to: '/admin/courses/drafts', label: 'Draft Prep', roles: courseRoles },
+  { to: '/admin/courses/review', label: 'Review Queue', roles: courseRoles },
+  { to: '/admin/courses/published', label: 'Published Catalog', roles: courseRoles },
+  { to: '/admin/invites', label: 'Invite Ops', roles: peopleRoles },
+  { to: '/admin/users', label: 'Admin Users', roles: peopleRoles },
+  { to: '/admin/reports/snapshot', label: 'Report Snapshot' },
+  { to: '/admin/reports/completions', label: 'Report Completions' },
+  { to: '/admin/reports/progress', label: 'Report Progress' },
 ]
 
 export function AppLayout() {
@@ -55,11 +67,13 @@ export function AppLayout() {
 
             <div className="side-nav__group">
               <p className="side-nav__label">Operate</p>
-              {adminNav.map((item) => (
-                <NavLink key={item.to} to={item.to}>
-                  {item.label}
-                </NavLink>
-              ))}
+              {adminNav
+                .filter((item) => !item.roles || item.roles.includes(user.role))
+                .map((item) => (
+                  <NavLink key={item.to} to={item.to}>
+                    {item.label}
+                  </NavLink>
+                ))}
             </div>
           </nav>
         </div>
@@ -77,7 +91,7 @@ export function AppLayout() {
         </main>
         <footer className="bottom-bar">
           <span>Momentum first. Resume quickly, record cleanly, keep evidence ready.</span>
-          <Link to="/my-learning">View transcript</Link>
+          <Link to="/my-learning/transcript">View transcript</Link>
         </footer>
       </div>
     </div>

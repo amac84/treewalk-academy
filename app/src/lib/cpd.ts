@@ -1,5 +1,10 @@
 import { CPD_QUARTER_HOUR_INCREMENT } from '../constants'
 
+type CourseLikeForCpd = {
+  videoMinutes: number
+  cpdHoursOverride?: number | null
+}
+
 export const calculateCPDHours = (videoMinutes: number): number => {
   if (!Number.isFinite(videoMinutes) || videoMinutes <= 0) {
     return 0
@@ -12,6 +17,9 @@ export const calculateCPDHours = (videoMinutes: number): number => {
 }
 
 export const calculateCpdHours = calculateCPDHours
+
+export const getCourseCPDHours = (course: CourseLikeForCpd): number =>
+  course.cpdHoursOverride ?? calculateCPDHours(course.videoMinutes)
 
 export function formatCpdHours(hours: number): string {
   return `${hours.toFixed(2)} CPD hours`

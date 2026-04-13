@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
-  calculateCourseProgress,
-  canMarkSegmentWatched,
   evaluateCompletion,
+  getWatchedPercentFromEnrollment,
   scoreQuizAttempt,
 } from './courseLogic'
 import type { Course, Enrollment } from '../types'
 
+/** Test fixture only — not the app demo seed in `data/mockData.ts`. */
 const baseCourse: Course = {
   id: 'course-1',
   title: 'Test course',
@@ -18,14 +18,11 @@ const baseCourse: Course = {
   instructorId: 'u-1',
   status: 'published',
   videoMinutes: 60,
+  muxStatus: 'idle',
+  transcriptStatus: 'idle',
   version: 1,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
-  segments: [
-    { id: 's1', title: 's1', durationMinutes: 20, order: 1 },
-    { id: 's2', title: 's2', durationMinutes: 20, order: 2 },
-    { id: 's3', title: 's3', durationMinutes: 20, order: 3 },
-  ],
   quiz: [
     {
       id: 'q1',
@@ -51,23 +48,35 @@ const makeEnrollment = (overrides?: Partial<Enrollment>): Enrollment => ({
   userId: 'u-learner',
   courseId: 'course-1',
   enrolledAt: '2026-01-02T00:00:00Z',
-  watchedSegmentIds: [],
   watchedMinutes: 0,
+  videoProgress: undefined,
   quizAttempts: [],
   ...overrides,
 })
 
 describe('course progress and completion', () => {
-  it('calculates percentage correctly from segment counts', () => {
-    expect(calculateCourseProgress(0, 3)).toBe(0)
-    expect(calculateCourseProgress(1, 3)).toBe(33)
-    expect(calculateCourseProgress(2, 3)).toBe(67)
-    expect(calculateCourseProgress(3, 3)).toBe(100)
+  it('derives watched percent from video progress when minutes are not set', () => {
+    const watchedPercent = getWatchedPercentFromEnrollment(
+      baseCourse,
+      makeEnrollment({
+        watchedMinutes: 0,
+        videoProgress: {
+          durationSeconds: 600,
+          watchedSeconds: 300,
+          furthestSecond: 300,
+          lastPositionSecond: 300,
+          completed: false,
+          pausedCount: 0,
+          resumedCount: 0,
+          seekViolations: 0,
+        },
+      }),
+    )
+    expect(watchedPercent).toBe(50)
   })
 
   it('does not complete course at 99% watched', () => {
     const enrollment = makeEnrollment({
-      watchedSegmentIds: ['s1', 's2'],
       watchedMinutes: 59,
       quizAttempts: [
         {
@@ -79,17 +88,20 @@ describe('course progress and completion', () => {
           passed: true,
           submittedAt: '2026-01-02T10:00:00Z',
           attemptNumber: 1,
+          passThreshold: 70,
+          renderedQuestions: baseCourse.quiz,
+          generatedQuestionCount: 20,
+          shownQuestionCount: 2,
         },
       ],
     })
     const result = evaluateCompletion(baseCourse, enrollment)
     expect(result.completed).toBe(false)
-    expect(result.watchedPercent).toBe(67)
+    expect(result.watchedPercent).toBe(98)
   })
 
   it('keeps latest passing attempt as active', () => {
     const enrollment = makeEnrollment({
-      watchedSegmentIds: ['s1', 's2', 's3'],
       watchedMinutes: 60,
       quizAttempts: [
         {
@@ -101,6 +113,10 @@ describe('course progress and completion', () => {
           passed: true,
           submittedAt: '2026-01-02T10:00:00Z',
           attemptNumber: 1,
+          passThreshold: 70,
+          renderedQuestions: baseCourse.quiz,
+          generatedQuestionCount: 20,
+          shownQuestionCount: 2,
         },
         {
           id: 'qa-2',
@@ -111,6 +127,10 @@ describe('course progress and completion', () => {
           passed: false,
           submittedAt: '2026-01-02T11:00:00Z',
           attemptNumber: 2,
+          passThreshold: 70,
+          renderedQuestions: baseCourse.quiz,
+          generatedQuestionCount: 20,
+          shownQuestionCount: 2,
         },
       ],
     })
@@ -120,18 +140,10 @@ describe('course progress and completion', () => {
   })
 })
 
-describe('quiz and no-skip enforcement', () => {
+describe('quiz scoring', () => {
   it('scores quiz attempts as percentages', () => {
     expect(scoreQuizAttempt(baseCourse.quiz, { q1: 'a', q2: 'b' })).toBe(100)
     expect(scoreQuizAttempt(baseCourse.quiz, { q1: 'a', q2: 'a' })).toBe(50)
     expect(scoreQuizAttempt(baseCourse.quiz, { q1: 'b', q2: 'a' })).toBe(0)
-  })
-
-  it('prevents skipping ahead of next segment', () => {
-    const blocked = canMarkSegmentWatched(baseCourse, ['s1'], 's3')
-    expect(blocked.allowed).toBe(false)
-
-    const allowed = canMarkSegmentWatched(baseCourse, ['s1'], 's2')
-    expect(allowed.allowed).toBe(true)
   })
 })

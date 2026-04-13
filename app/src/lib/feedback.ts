@@ -64,9 +64,9 @@ export async function submitFeedback(payload: FeedbackSubmission): Promise<Feedb
   if (typeof window !== 'undefined' && feedbackEndpointUsesDefaultUrl(endpoint)) {
     return {
       success: false,
-      error: import.meta.env.PROD
-        ? 'Feedback URL is missing in this build. In Cloudflare Pages → Settings → Environment variables, set VITE_FEEDBACK_FUNCTION_URL to the full https://…supabase.co/functions/v1/create-linear-ticket URL (Production and Preview if needed), plus VITE_SUPABASE_ANON_KEY, then redeploy. Vite only reads these at build time.'
-        : 'Set VITE_FEEDBACK_FUNCTION_URL in app/.env to your full Supabase function URL (see .env.example). Relative /functions/… only works if something proxies to Supabase.',
+      error: import.meta.env.DEV
+        ? 'Feedback is not wired locally. Set VITE_FEEDBACK_FUNCTION_URL in app/.env to your hosted feedback URL (see .env.example).'
+        : 'Feedback is not available in this build. Your team needs to turn on the feedback connection in hosting settings.',
     }
   }
 
@@ -75,14 +75,17 @@ export async function submitFeedback(payload: FeedbackSubmission): Promise<Feedb
       if (new URL(endpoint).origin === window.location.origin) {
         return {
           success: false,
-          error:
-            'VITE_FEEDBACK_FUNCTION_URL points at this same website, not Supabase. Use the URL from Supabase Dashboard → Edge Functions → create-linear-ticket (copy).',
+          error: import.meta.env.DEV
+            ? 'VITE_FEEDBACK_FUNCTION_URL points at this site instead of your feedback API. Copy the function URL from your backend dashboard.'
+            : 'Feedback is pointed at the wrong address. Ask your administrator to fix the feedback URL.',
         }
       }
     } catch {
       return {
         success: false,
-        error: 'VITE_FEEDBACK_FUNCTION_URL is not a valid URL. Copy the function URL from the Supabase dashboard.',
+        error: import.meta.env.DEV
+          ? 'VITE_FEEDBACK_FUNCTION_URL is not a valid URL. Use a full https://… link from your backend dashboard.'
+          : 'Feedback address is invalid. Ask your administrator to check configuration.',
       }
     }
   }
@@ -118,7 +121,7 @@ export async function submitFeedback(payload: FeedbackSubmission): Promise<Feedb
   } catch {
     return {
       success: false,
-      error: 'Network error — could not reach the feedback server. Check your connection and VITE_FEEDBACK_FUNCTION_URL.',
+      error: 'Could not reach the feedback service. Check your connection and try again.',
     }
   }
 
@@ -137,16 +140,18 @@ export async function submitFeedback(payload: FeedbackSubmission): Promise<Feedb
     if (response.status === 404 && feedbackEndpointUsesDefaultUrl(endpoint)) {
       return {
         success: false,
-        error:
-          'Feedback endpoint not found. Set VITE_FEEDBACK_FUNCTION_URL to your Supabase function URL in app/.env (local) and Cloudflare Pages → Environment variables (production), then rebuild.',
+        error: import.meta.env.DEV
+          ? 'Feedback endpoint not found. Set VITE_FEEDBACK_FUNCTION_URL in app/.env and restart the dev server.'
+          : 'Feedback could not be sent — the service may not be deployed yet.',
       }
     }
 
     if (response.status === 401 || response.status === 403) {
       return {
         success: false,
-        error:
-          'Feedback was rejected (unauthorized). Deploy the Edge Function with public access for anonymous reports, or fix Supabase JWT settings.',
+        error: import.meta.env.DEV
+          ? 'Feedback was rejected (unauthorized). Check auth settings on the feedback function.'
+          : 'Feedback could not be sent. You may need to sign in, or your team must adjust permissions.',
       }
     }
 
@@ -163,28 +168,36 @@ export async function submitFeedback(payload: FeedbackSubmission): Promise<Feedb
       if (needsSupabaseHeaders && !hasAnon) {
         return {
           success: false,
-          error:
-            'Supabase rejected the request (405). Add VITE_SUPABASE_ANON_KEY (same publishable/anon key as the rest of the app) to Cloudflare Pages environment variables and rebuild.',
+          error: import.meta.env.DEV
+            ? 'Missing VITE_SUPABASE_ANON_KEY for this feedback URL. Add it to app/.env (same public key as the rest of the app).'
+            : 'Feedback could not be sent. Your team may need to add the public app key to hosting environment variables.',
         }
       }
       return {
         success: false,
-        error:
-          'Server refused POST (405). Confirm VITE_FEEDBACK_FUNCTION_URL is the full Supabase function URL (Dashboard → Edge Functions → copy). If it is, verify the function name and that the latest deploy finished.',
+        error: import.meta.env.DEV
+          ? 'Server refused the feedback request (405). Confirm VITE_FEEDBACK_FUNCTION_URL is the full function URL from your backend dashboard.'
+          : 'Feedback could not be sent. Your team should verify the feedback URL and latest deploy.',
       }
     }
 
     const snippet = text.replace(/\s+/g, ' ').trim().slice(0, 160)
+    const detail =
+      import.meta.env.DEV && snippet
+        ? ` (${response.status}: ${snippet})`
+        : import.meta.env.DEV
+          ? ` (${response.status})`
+          : ''
     return {
       success: false,
-      error: snippet
-        ? `Could not submit feedback (HTTP ${response.status}): ${snippet}`
-        : `Could not submit feedback (HTTP ${response.status}).`,
+      error: import.meta.env.DEV
+        ? `Could not submit feedback${detail}.`
+        : 'Could not submit feedback. Please try again later or contact your team.',
     }
   }
 
   if (!rawResult) {
-    return { success: false, error: 'Invalid JSON response from feedback server.' }
+    return { success: false, error: 'The feedback service returned an unexpected response.' }
   }
 
   return {

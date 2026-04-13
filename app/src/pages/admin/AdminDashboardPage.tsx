@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useAppStore } from '../../hooks/useAppStore'
-import { calculateCPDHours } from '../../lib/cpd'
+import { getCourseCPDHours } from '../../lib/cpd'
 
 export function AdminDashboardPage() {
   const store = useAppStore()
@@ -12,7 +12,7 @@ export function AdminDashboardPage() {
     const activeUsers = store.users.filter((user) => user.status === 'active').length
     const certificates = store.certificates.length
     const totalCPD = store.courses.reduce(
-      (sum, course) => sum + calculateCPDHours(course.videoMinutes),
+      (sum, course) => sum + getCourseCPDHours(course),
       0,
     )
 

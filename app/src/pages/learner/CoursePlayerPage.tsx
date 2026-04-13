@@ -1,13 +1,30 @@
 import MuxPlayer from '@mux/mux-player-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useAppStore } from '../../hooks/useAppStore'
 import { getWatchedPercentFromEnrollment } from '../../lib/courseLogic'
+import {
+  buildCourseTranscriptDownload,
+  buildCourseTranscriptPlainText,
+  formatTranscriptTimestamp,
+  readTranscriptData,
+} from '../../lib/transcript'
+
+type MuxPlayerElement = HTMLElement & {
+  currentTime?: number
+  duration?: number
+  playbackRate?: number
+}
 
 export function CoursePlayerPage() {
   const { courseId = '' } = useParams()
-  const { courses, currentUserId, getActiveEnrollment, markSegmentWatched } = useAppStore()
-  const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null)
+  const { courses, currentUserId, getActiveEnrollment, recordVideoPlayback } = useAppStore()
+  const [transcriptExpanded, setTranscriptExpanded] = useState(false)
+  const [copyFeedback, setCopyFeedback] = useState<'idle' | 'copied' | 'error'>('idle')
+  const playerRef = useRef<MuxPlayerElement | null>(null)
+  const lastTickRef = useRef<number | null>(null)
+  const isPlayingRef = useRef(false)
+  const copyFeedbackTimerRef = useRef<number | null>(null)
   const course = courses.find((item) => item.id === courseId)
   const enrollment = getActiveEnrollment(currentUserId, courseId)
 
@@ -25,17 +42,187 @@ export function CoursePlayerPage() {
   }
 
   const watchedPercent = getWatchedPercentFromEnrollment(course, enrollment)
-  const sortedSegments = [...course.segments].sort((a, b) => a.order - b.order)
-  const nextSegmentId =
-    sortedSegments.find((segment) => !enrollment.watchedSegmentIds.includes(segment.id))?.id ??
-    sortedSegments[sortedSegments.length - 1]?.id
-
-  const activeSegmentId =
-    selectedSegmentId ?? nextSegmentId ?? sortedSegments[0]?.id ?? null
-  const activeSegment = sortedSegments.find((segment) => segment.id === activeSegmentId)
+  const activeTranscript = readTranscriptData({
+    transcript: course.transcript,
+    transcriptText: course.transcriptText,
+    durationMinutes: course.videoMinutes,
+  })
+  const transcriptCues = activeTranscript?.segments ?? []
+  const collapsedCueCount = 4
+  const visibleTranscriptCues = transcriptExpanded ? transcriptCues : transcriptCues.slice(0, collapsedCueCount)
+  const transcriptHasHiddenCues = transcriptCues.length > visibleTranscriptCues.length
+  const courseTranscriptPlainText = buildCourseTranscriptPlainText(course)
+  const canExportCourseTranscript = courseTranscriptPlainText.trim().length > 0
+  const activeProgress = enrollment.videoProgress
   const demoPlaybackId = import.meta.env.VITE_MUX_PLAYBACK_ID?.trim() || ''
-  const playbackId = activeSegment?.muxPlaybackId || demoPlaybackId || undefined
+  const playbackId = course.muxPlaybackId || demoPlaybackId || undefined
   const muxEnvKey = import.meta.env.VITE_MUX_ENV_KEY?.trim()
+  const quizUnlocked = watchedPercent >= 100
+  const allowedSeekSecond = Math.max(
+    0,
+    (activeProgress?.completed ? activeProgress.durationSeconds : activeProgress?.furthestSecond) ?? 0,
+  )
+
+  useEffect(() => {
+    lastTickRef.current = activeProgress?.lastPositionSecond ?? 0
+    isPlayingRef.current = false
+  }, [activeProgress?.lastPositionSecond])
+
+  useEffect(() => {
+    setTranscriptExpanded(false)
+    setCopyFeedback('idle')
+  }, [course.id])
+
+  useEffect(() => {
+    return () => {
+      if (copyFeedbackTimerRef.current != null) {
+        window.clearTimeout(copyFeedbackTimerRef.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    const player = playerRef.current
+    if (!player || !activeProgress?.lastPositionSecond) return
+    if (Math.abs(Number(player.currentTime ?? 0) - activeProgress.lastPositionSecond) < 3) return
+    player.currentTime = activeProgress.lastPositionSecond
+  }, [activeProgress?.lastPositionSecond, course.id])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!isPlayingRef.current) return
+      const player = playerRef.current
+      const currentTime = Math.max(0, Number(player?.currentTime ?? 0))
+      const durationSeconds = Math.max(1, Math.round(Number(player?.duration || course.videoMinutes * 60 || 1)))
+      const previous = lastTickRef.current ?? currentTime
+      const watchedDeltaSeconds = Math.max(0, currentTime - previous)
+      lastTickRef.current = currentTime
+      recordVideoPlayback(course.id, {
+        positionSecond: currentTime,
+        durationSeconds,
+        watchedDeltaSeconds,
+        isPlaying: true,
+      })
+    }, 5000)
+    return () => window.clearInterval(timer)
+  }, [course.id, course.videoMinutes, recordVideoPlayback])
+
+  const handlePlayPauseEvent = (resumed: boolean) => {
+    const player = playerRef.current
+    const currentTime = Math.max(0, Number(player?.currentTime ?? 0))
+    const durationSeconds = Math.max(1, Math.round(Number(player?.duration || course.videoMinutes * 60 || 1)))
+    const previous = lastTickRef.current ?? currentTime
+    const watchedDeltaSeconds = resumed ? 0 : Math.max(0, currentTime - previous)
+    lastTickRef.current = currentTime
+    recordVideoPlayback(course.id, {
+      positionSecond: currentTime,
+      durationSeconds,
+      watchedDeltaSeconds,
+      isPlaying: resumed,
+      paused: !resumed,
+      resumed,
+    })
+  }
+
+  const handleSeeking = () => {
+    const player = playerRef.current
+    if (!player) return
+    const currentTime = Math.max(0, Number(player.currentTime ?? 0))
+    const maxAllowed = allowedSeekSecond + 2
+    if (currentTime <= maxAllowed) return
+    player.currentTime = maxAllowed
+    lastTickRef.current = maxAllowed
+    const durationSeconds = Math.max(1, Math.round(Number(player.duration || course.videoMinutes * 60 || 1)))
+    recordVideoPlayback(course.id, {
+      positionSecond: maxAllowed,
+      durationSeconds,
+      watchedDeltaSeconds: 0,
+      isPlaying: isPlayingRef.current,
+      seekViolation: true,
+    })
+  }
+
+  const handleEnded = () => {
+    const player = playerRef.current
+    const durationSeconds = Math.max(1, Math.round(Number(player?.duration || course.videoMinutes * 60 || 1)))
+    const currentTime = Math.max(0, Number(player?.currentTime ?? durationSeconds))
+    const previous = lastTickRef.current ?? 0
+    isPlayingRef.current = false
+    lastTickRef.current = currentTime
+    recordVideoPlayback(course.id, {
+      positionSecond: currentTime,
+      durationSeconds,
+      watchedDeltaSeconds: Math.max(0, currentTime - previous),
+      isPlaying: false,
+      completed: true,
+    })
+  }
+
+  const handleRateChange = () => {
+    const player = playerRef.current
+    const rate = Number(player?.playbackRate ?? 1)
+    if (!Number.isFinite(rate) || rate <= 1.05) return
+    if (player) player.playbackRate = 1
+    const currentTime = Math.max(0, Number(player?.currentTime ?? 0))
+    const durationSeconds = Math.max(1, Math.round(Number(player?.duration || course.videoMinutes * 60 || 1)))
+    recordVideoPlayback(course.id, {
+      positionSecond: currentTime,
+      durationSeconds,
+      watchedDeltaSeconds: 0,
+      isPlaying: isPlayingRef.current,
+      seekViolation: true,
+    })
+  }
+
+  const setCopyFeedbackWithReset = (nextState: 'copied' | 'error') => {
+    setCopyFeedback(nextState)
+    if (copyFeedbackTimerRef.current != null) {
+      window.clearTimeout(copyFeedbackTimerRef.current)
+    }
+    copyFeedbackTimerRef.current = window.setTimeout(() => {
+      setCopyFeedback('idle')
+      copyFeedbackTimerRef.current = null
+    }, 2200)
+  }
+
+  const handleCopyTranscript = async () => {
+    const text = courseTranscriptPlainText.trim()
+    if (!text) return
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        const area = document.createElement('textarea')
+        area.value = text
+        area.setAttribute('readonly', 'true')
+        area.style.position = 'fixed'
+        area.style.opacity = '0'
+        document.body.append(area)
+        area.select()
+        document.execCommand('copy')
+        area.remove()
+      }
+      setCopyFeedbackWithReset('copied')
+    } catch {
+      setCopyFeedbackWithReset('error')
+    }
+  }
+
+  const handleDownloadTranscriptJson = () => {
+    const payload = buildCourseTranscriptDownload(course)
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    const safeTitle =
+      course.title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || course.id
+    anchor.href = url
+    anchor.download = `${safeTitle}-transcript.json`
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
 
   return (
     <section className="player-page">
@@ -44,13 +231,14 @@ export function CoursePlayerPage() {
           <p className="section-eyebrow">Course player</p>
           <h1>{course.title}</h1>
           <p className="page-subtitle">
-            Complete each segment in order. No skipping; your record updates only after each watched step.
+            Watch the full lesson with verified progress tracking. Pausing is fine; fast-forward beyond verified viewing
+            is blocked for CPD evidence quality.
           </p>
         </div>
         <div className="player-progress">
           <p className="player-progress__value">{watchedPercent}%</p>
           <p className="player-progress__meta">
-            {enrollment.watchedMinutes} of {course.videoMinutes} minutes recorded
+            {enrollment.watchedMinutes} of {course.videoMinutes} minutes verified
           </p>
         </div>
       </header>
@@ -60,103 +248,154 @@ export function CoursePlayerPage() {
           <div className="video-shell__head">
             <div>
               <p className="section-eyebrow">Now playing</p>
-              <h2>{activeSegment?.title ?? 'Playback pending'}</h2>
+              <h2>{course.title}</h2>
             </div>
             <p className="meta-line">
-              {activeSegment?.durationMinutes ?? 0} mins
-              {activeSegment?.muxPlaybackId ? ' · Mux ready' : ' · Demo source required'}
+              {course.videoMinutes} mins
+              {course.muxPlaybackId
+                ? ' · Video ready'
+                : demoPlaybackId
+                  ? ' · Demo video'
+                  : ' · Video not attached yet'}
             </p>
           </div>
           <div className="video-frame mux-player-frame">
             {playbackId ? (
               <MuxPlayer
+                ref={(value) => {
+                  playerRef.current = value as MuxPlayerElement | null
+                }}
                 playbackId={playbackId}
                 streamType="on-demand"
                 accentColor="var(--accent, #0d9488)"
                 envKey={muxEnvKey || undefined}
-                metadataVideoTitle={activeSegment?.title ?? course.title}
+                metadataVideoTitle={course.title}
+                onPlay={() => {
+                  isPlayingRef.current = true
+                  handlePlayPauseEvent(true)
+                }}
+                onPause={() => {
+                  isPlayingRef.current = false
+                  handlePlayPauseEvent(false)
+                }}
+                onSeeking={() => {
+                  handleSeeking()
+                }}
+                onRateChange={() => {
+                  handleRateChange()
+                }}
+                onEnded={() => {
+                  handleEnded()
+                }}
               />
             ) : (
               <div className="video-placeholder">
                 <p>
-                  <strong>Currently on:</strong> {activeSegment?.title ?? '—'}
+                  <strong>Currently on:</strong> {course.title}
                 </p>
                 <p>
-                  No Mux playback ID is attached to this segment yet. Upload one from Admin → Courses or
-                  provide <code>VITE_MUX_PLAYBACK_ID</code> for a demo asset.
+                  No video is attached to this course yet. Your team can add one under Admin → Courses.
+                  {import.meta.env.DEV ? (
+                    <>
+                      {' '}
+                      For local demos, set <code>VITE_MUX_PLAYBACK_ID</code> in <code>app/.env</code>.
+                    </>
+                  ) : null}
                 </p>
               </div>
             )}
           </div>
           <div className="player-actions">
-            <Link className="action-link action-link--primary" to={`/courses/${course.id}/quiz`}>
-              Go to quiz
-            </Link>
+            {quizUnlocked ? (
+              <Link className="action-link action-link--primary" to={`/courses/${course.id}/quiz`}>
+                Go to quiz
+              </Link>
+            ) : (
+              <span className="action-link action-link--primary" aria-disabled>
+                Quiz unlocks at 100% watched
+              </span>
+            )}
             <Link className="action-link" to={`/courses/${course.id}`}>
               Course details
             </Link>
           </div>
-        </article>
-
-        <aside className="segment-panel">
-          <div className="segment-panel__head">
-            <div>
-              <p className="section-eyebrow">Segment order</p>
-              <h3>Progress ladder</h3>
+          <section className="stack-sm course-transcript" aria-labelledby="course-transcript-heading">
+            <div className="course-transcript__head">
+              <p className="section-eyebrow" id="course-transcript-heading">
+                Transcript
+              </p>
             </div>
-            <p className="meta-line">Finish the next unlocked step to continue.</p>
-          </div>
-          <ul className="segment-list">
-            {sortedSegments.map((segment) => {
-              const isWatched = enrollment.watchedSegmentIds.includes(segment.id)
-              const isAllowed = isWatched || segment.id === nextSegmentId
-              const isActive = segment.id === activeSegmentId
-              const canSelect = isWatched || isAllowed
-
-              return (
-                <li
-                  key={segment.id}
-                  className={[
-                    'segment',
-                    isWatched ? 'watched' : '',
-                    isActive ? 'segment-active' : '',
-                    canSelect ? 'segment-selectable' : '',
-                  ]
-                    .filter(Boolean)
-                    .join(' ')}
+            {course.transcriptStatus === 'processing' ? (
+              <p className="muted">Transcript is generating. Check back shortly.</p>
+            ) : null}
+            {course.transcriptStatus === 'error' ? (
+              <p className="inline-error">
+                Transcript unavailable: {course.transcriptErrorMessage ?? 'Generation failed.'}
+              </p>
+            ) : null}
+            {activeTranscript ? (
+              <div
+                className={`course-transcript__panel ${
+                  transcriptExpanded ? 'course-transcript__panel--expanded' : 'course-transcript__panel--collapsed'
+                }`}
+              >
+                <ul className="course-transcript__list">
+                  {visibleTranscriptCues.map((cue, index) => {
+                    const timestamp = formatTranscriptTimestamp(cue.startSeconds)
+                    return (
+                      <li key={`${course.id}-cue-${index}`} className="course-transcript__cue">
+                        <span className="course-transcript__timestamp">{timestamp || 'Approx'}</span>
+                        <p>{cue.text}</p>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            ) : null}
+            {activeTranscript && transcriptHasHiddenCues && !transcriptExpanded ? (
+              <p className="meta-line">
+                Showing {visibleTranscriptCues.length} of {transcriptCues.length} transcript blocks.
+              </p>
+            ) : null}
+            {activeTranscript ? (
+              <div className="course-transcript__actions">
+                <button
+                  type="button"
+                  className="button button--secondary"
+                  onClick={() => setTranscriptExpanded((prev) => !prev)}
                 >
-                  <div className="segment-copy">
-                    <p className="segment-index">{String(segment.order).padStart(2, '0')}</p>
-                    <div>
-                      <button
-                        type="button"
-                        className="segment-title-btn"
-                        disabled={!canSelect}
-                        onClick={() => {
-                          if (canSelect) setSelectedSegmentId(segment.id)
-                        }}
-                      >
-                        <strong>{segment.title}</strong>
-                      </button>
-                      <p className="meta-line">
-                        {segment.durationMinutes} mins · {isWatched ? 'Watched' : isAllowed ? 'Ready now' : 'Locked'}
-                        {segment.muxPlaybackId ? ' · Mux' : ''}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="segment-action"
-                    onClick={() => markSegmentWatched(course.id, segment.id)}
-                    disabled={!isAllowed || isWatched}
-                  >
-                    {isWatched ? 'Completed' : isAllowed ? 'Mark watched' : 'Locked'}
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
-        </aside>
+                  {transcriptExpanded ? 'Show less' : 'Show more'}
+                </button>
+                <button
+                  type="button"
+                  className="button button--secondary"
+                  onClick={() => void handleCopyTranscript()}
+                  disabled={!canExportCourseTranscript}
+                  aria-label="Copy full course transcript"
+                >
+                  Copy text
+                </button>
+                <button
+                  type="button"
+                  className="button button--secondary"
+                  onClick={handleDownloadTranscriptJson}
+                  disabled={!canExportCourseTranscript}
+                >
+                  Download JSON
+                </button>
+              </div>
+            ) : null}
+            {copyFeedback === 'copied' ? <p className="meta-line">Full course transcript copied.</p> : null}
+            {copyFeedback === 'error' ? (
+              <p className="inline-error">Could not copy the transcript. Please try again.</p>
+            ) : null}
+            {!activeTranscript &&
+            course.transcriptStatus !== 'processing' &&
+            course.transcriptStatus !== 'error' ? (
+              <p className="muted">Transcript not available yet for this course.</p>
+            ) : null}
+          </section>
+        </article>
       </div>
     </section>
   )

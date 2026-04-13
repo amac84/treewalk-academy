@@ -1,65 +1,52 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { REQUIRED_PASSING_SCORE } from '../constants'
-import { initialState } from '../data/mockData'
-import { persistCourseToSupabase, loadCoursesFromSupabase } from '../lib/coursePersistence'
-import { calculateCPDHours } from '../lib/cpd'
+import { CERTIFICATE_PROVIDER_NAME } from '../constants'
+import { mockInitialState } from '../data/mockData'
+import {
+  deleteCourseFromSupabase,
+  loadLearnerRuntimeStateFromSupabase,
+  loadCoursesFromSupabase,
+  persistLearnerRuntimeState,
+  persistCourseToSupabase,
+} from '../lib/coursePersistence'
+import { getCourseCPDHours } from '../lib/cpd'
+import { buildQuizPolicy, ensureQuizPolicy } from '../lib/quizPolicy'
 import { getSupabaseBrowserClient } from '../lib/supabaseClient'
 import {
-  canMarkSegmentWatched,
   evaluateCompletion,
+  getWatchedPercentFromEnrollment,
   getLatestPassedAttempt,
   scoreQuizAttempt,
 } from '../lib/courseLogic'
 import type {
   AppState,
   Course,
-  CourseSegment,
+  CourseLevel,
   CoursesSyncStatus,
   CourseStatus,
+  CourseTopic,
   Enrollment,
   Invite,
+  LearningActivityEvent,
+  QuizPolicy,
+  QuizQuestion,
+  VideoWatchProgress,
   QuizAttempt,
   User,
   UserRole,
 } from '../types'
-import { AppStoreContext } from './AppStoreContext'
+import {
+  AppStoreContext,
+  type AppStoreContextValue,
+  type CreateCourseInput,
+  type VideoPlaybackUpdateInput,
+  type VideoTranscriptionProgress,
+  type VideoUploadProgress,
+  type UpdateCourseInput,
+} from './AppStoreContext'
 
 interface ActionResult {
   ok: boolean
   message?: string
-}
-
-export interface AppStoreContextValue extends AppState {
-  state: AppState
-  currentUserId: string
-  currentUser: User | null
-  currentUserRole: UserRole | null
-  setCurrentUser: (userId: string) => void
-  issueInvite: (email: string, role: UserRole) => Invite
-  inviteUser: (email: string, fullName: string, role: UserRole) => Invite
-  acceptInvite: (code: string) => { ok: true; user: User } | { ok: false; error: string }
-  suspendUser: (userId: string, suspended?: boolean) => void
-  enrollInCourse: (courseId: string) => ActionResult
-  markSegmentWatched: (courseId: string, segmentId: string) => ActionResult
-  submitQuizAttempt: (courseId: string, answers: Record<string, string>) => QuizAttempt | null
-  transitionCourseStatus: (courseId: string, nextStatus: CourseStatus) => ActionResult
-  updateCourseSegmentMux: (
-    courseId: string,
-    segmentId: string,
-    mux: Partial<
-      Pick<
-        CourseSegment,
-        'muxUploadId' | 'muxAssetId' | 'muxPlaybackId' | 'muxStatus' | 'muxErrorMessage'
-      >
-    >,
-  ) => void
-  toggleWebinarAttendance: (webinarId: string) => void
-  getCourseReadiness: (courseId: string, userId?: string) => ReturnType<typeof evaluateCompletion>
-  getActiveEnrollment: (userId: string, courseId: string) => Enrollment | null
-  transcriptForCurrentUser: AppState['transcript']
-  coursesSyncStatus: CoursesSyncStatus
-  coursesSyncMessage: string | null
-  clearCoursesSyncMessage: () => void
 }
 
 const createCode = () =>
@@ -67,6 +54,62 @@ const createCode = () =>
 
 const createId = (prefix: string) =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+const toRuntimeState = (state: AppState) => ({
+  enrollments: state.enrollments,
+  progress: state.progress,
+  completions: state.completions,
+  certificates: state.certificates,
+  cpdLedger: state.cpdLedger,
+  transcript: state.transcript,
+  learningActivityLog: state.learningActivityLog,
+})
+
+const createQuestionId = (courseId: string, index: number) => `${courseId}-q-${index + 1}`
+const createQuestionOptionId = (questionIndex: number, optionIndex: number) =>
+  `q${questionIndex + 1}-o${optionIndex + 1}`
+
+const MAX_HEARTBEAT_DELTA_SECONDS = 12
+const MAX_POSITION_ADVANCE_SECONDS = 20
+
+const ensureEnrollmentVideoProgress = (
+  enrollment: Enrollment,
+  durationSeconds: number,
+): VideoWatchProgress => {
+  const existing = enrollment.videoProgress
+  if (existing) return existing
+  return {
+    durationSeconds,
+    watchedSeconds: 0,
+    furthestSecond: 0,
+    lastPositionSecond: 0,
+    completed: false,
+    pausedCount: 0,
+    resumedCount: 0,
+    seekViolations: 0,
+  }
+}
+
+/** Who may attach or replace hosted course video (matches AdminCoursesPage visibility). */
+const canManageCourseMux = (role: UserRole | null, course: Course, userId: string): boolean => {
+  if (!role) return false
+  if (role === 'super_admin' || role === 'content_admin') return true
+  if (role === 'instructor') return course.instructorId === userId
+  return false
+}
+
+const canAuthorCourses = (role: UserRole | null): boolean =>
+  role === 'instructor' || role === 'content_admin' || role === 'super_admin'
+
+const sanitizeCourseDetails = (input: UpdateCourseInput): Omit<UpdateCourseInput, 'instructorId'> & { instructorId?: string } => ({
+  title: input.title.trim(),
+  summary: input.summary.trim(),
+  description: input.description.trim(),
+  category: input.category.trim(),
+  topic: input.topic as CourseTopic,
+  level: input.level as CourseLevel,
+  instructorId: input.instructorId?.trim(),
+})
 
 const canTransitionCourseStatus = (
   role: UserRole | null,
@@ -94,14 +137,75 @@ const canTransitionCourseStatus = (
 }
 
 export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
-  const [state, setState] = useState<AppState>(initialState)
+  const [state, setState] = useState<AppState>(mockInitialState)
   const [currentUserId, setCurrentUserId] = useState('u-learner-1')
+  const [videoProcessingProgress, setVideoProcessingProgress] = useState<
+    AppStoreContextValue['videoProcessingProgress']
+  >({})
   const [coursesSyncStatus, setCoursesSyncStatus] = useState<CoursesSyncStatus>(() =>
     getSupabaseBrowserClient() ? 'loading' : 'local_only',
   )
   const [coursesSyncMessage, setCoursesSyncMessage] = useState<string | null>(null)
 
   const clearCoursesSyncMessage = useCallback(() => setCoursesSyncMessage(null), [])
+
+  const setVideoUploadProgress = useCallback(
+    (courseId: string, progress: VideoUploadProgress | null) => {
+      setVideoProcessingProgress((prev) => {
+        const key = courseId
+        const existing = prev[key]
+        const next = {
+          ...(existing ?? {}),
+          ...(progress ? { upload: progress } : {}),
+        }
+        if (!progress) {
+          delete next.upload
+        }
+        if (!next.upload && !next.transcription) {
+          if (!(key in prev)) return prev
+          const rest = { ...prev }
+          delete rest[key]
+          return rest
+        }
+        return { ...prev, [key]: next }
+      })
+    },
+    [],
+  )
+
+  const setVideoTranscriptionProgress = useCallback(
+    (courseId: string, progress: VideoTranscriptionProgress | null) => {
+      setVideoProcessingProgress((prev) => {
+        const key = courseId
+        const existing = prev[key]
+        const next = {
+          ...(existing ?? {}),
+          ...(progress ? { transcription: progress } : {}),
+        }
+        if (!progress) {
+          delete next.transcription
+        }
+        if (!next.upload && !next.transcription) {
+          if (!(key in prev)) return prev
+          const rest = { ...prev }
+          delete rest[key]
+          return rest
+        }
+        return { ...prev, [key]: next }
+      })
+    },
+    [],
+  )
+
+  const clearVideoProcessingProgress = useCallback((courseId: string) => {
+    const key = courseId
+    setVideoProcessingProgress((prev) => {
+      if (!(key in prev)) return prev
+      const rest = { ...prev }
+      delete rest[key]
+      return rest
+    })
+  }, [])
 
   useEffect(() => {
     if (!getSupabaseBrowserClient()) {
@@ -112,15 +216,29 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
     void (async () => {
       setCoursesSyncStatus('loading')
       try {
-        const merged = await loadCoursesFromSupabase(initialState.courses)
+        const [merged, runtime] = await Promise.all([
+          loadCoursesFromSupabase(mockInitialState.courses),
+          loadLearnerRuntimeStateFromSupabase(),
+        ])
         if (cancelled) return
-        setState((s) => ({ ...s, courses: merged }))
+        const runtimeEnrollments = runtime?.enrollments
+        setState((s) => ({
+          ...s,
+          courses: merged,
+          enrollments: runtimeEnrollments ?? s.enrollments,
+          progress: runtime?.progress ?? s.progress,
+          completions: runtime?.completions ?? s.completions,
+          certificates: runtime?.certificates ?? s.certificates,
+          cpdLedger: runtime?.cpdLedger ?? s.cpdLedger,
+          transcript: runtime?.transcript ?? s.transcript,
+          learningActivityLog: runtime?.learningActivityLog ?? s.learningActivityLog,
+        }))
         setCoursesSyncStatus('synced')
         setCoursesSyncMessage(null)
       } catch (e) {
         if (cancelled) return
         setCoursesSyncStatus('error')
-        setCoursesSyncMessage(e instanceof Error ? e.message : 'Could not load courses from Supabase.')
+        setCoursesSyncMessage(e instanceof Error ? e.message : 'Could not load the shared course catalog.')
       }
     })()
 
@@ -128,6 +246,24 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (!getSupabaseBrowserClient() || coursesSyncStatus === 'loading') return
+    void persistLearnerRuntimeState(toRuntimeState(state)).then((result) => {
+      if (!result.ok) {
+        setCoursesSyncMessage(`Could not save learner records: ${result.message}`)
+      }
+    })
+  }, [
+    state.enrollments,
+    state.progress,
+    state.completions,
+    state.certificates,
+    state.cpdLedger,
+    state.transcript,
+    state.learningActivityLog,
+    coursesSyncStatus,
+  ])
 
   const currentUser = useMemo(
     () => state.users.find((user) => user.id === currentUserId) ?? null,
@@ -179,7 +315,8 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       const certificateId = createId('cert')
       const completionId = createId('comp')
       const now = new Date().toISOString()
-      const cpdHours = course.cpdHoursOverride ?? calculateCPDHours(course.videoMinutes)
+      const cpdHours = getCourseCPDHours(course)
+      const verificationCode = `TW-${Math.random().toString(36).slice(2, 10).toUpperCase()}`
 
       return {
         ...draft,
@@ -202,8 +339,14 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
             id: certificateId,
             userId: enrollment.userId,
             courseId: enrollment.courseId,
-            verificationCode: `TW-${Math.random().toString(36).slice(2, 10).toUpperCase()}`,
+            verificationCode,
             issuedAt: now,
+            providerName: CERTIFICATE_PROVIDER_NAME,
+            courseTitle: course.title,
+            durationHours: cpdHours,
+            completionDate: now,
+            quizAttemptId: latestAttempt.id,
+            passThreshold: latestAttempt.passThreshold,
           },
         ],
         cpdLedger: [
@@ -227,6 +370,11 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
             completedAt: now,
             cpdHours,
             certificateId,
+            verificationCode,
+            providerName: CERTIFICATE_PROVIDER_NAME,
+            quizAttemptId: latestAttempt.id,
+            passThreshold: latestAttempt.passThreshold,
+            activityWatchedMinutes: enrollment.watchedMinutes,
           },
         ],
         enrollments: draft.enrollments.map((item) =>
@@ -344,7 +492,6 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
         userId: currentUser.id,
         courseId,
         enrolledAt: new Date().toISOString(),
-        watchedSegmentIds: [],
         watchedMinutes: 0,
         quizAttempts: [],
       }
@@ -355,8 +502,8 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
     [currentUser, state.courses, getActiveEnrollment],
   )
 
-  const markSegmentWatched = useCallback(
-    (courseId: string, segmentId: string): ActionResult => {
+  const recordVideoPlayback = useCallback(
+    (courseId: string, update: VideoPlaybackUpdateInput): ActionResult => {
       if (!currentUser) return { ok: false, message: 'Please sign in.' }
 
       const course = state.courses.find((entry) => entry.id === courseId)
@@ -365,27 +512,62 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       const enrollment = getActiveEnrollment(currentUser.id, courseId)
       if (!enrollment) return { ok: false, message: 'Enroll first.' }
 
-      const allowed = canMarkSegmentWatched(course, enrollment.watchedSegmentIds, segmentId)
-      if (!allowed.allowed) {
-        return { ok: false, message: allowed.message }
-      }
-      if (enrollment.watchedSegmentIds.includes(segmentId)) return { ok: true }
-
-      const segment = course.segments.find((item) => item.id === segmentId)
-      if (!segment) return { ok: false, message: 'Segment not found.' }
+      const nowIso = new Date().toISOString()
+      const boundedPosition = Math.max(0, Math.round(update.positionSecond || 0))
+      const boundedDelta = Math.max(0, Math.round(update.watchedDeltaSeconds || 0))
 
       setState((prev) => {
+        const targetEnrollment = prev.enrollments.find((item) => item.id === enrollment.id)
+        if (!targetEnrollment) return prev
+
+        const durationSeconds = Math.max(1, Math.round(update.durationSeconds || course.videoMinutes * 60 || 1))
+        const currentProgress = ensureEnrollmentVideoProgress(targetEnrollment, durationSeconds)
+        const previousPosition = currentProgress.lastPositionSecond
+        const positionJump = Math.max(0, boundedPosition - previousPosition)
+        const suspiciousDelta = !update.completed && boundedDelta > MAX_HEARTBEAT_DELTA_SECONDS
+        const suspiciousJump = !update.completed && positionJump > MAX_POSITION_ADVANCE_SECONDS
+        const inferredSeekViolation = Boolean(update.seekViolation || suspiciousDelta || suspiciousJump)
+        const acceptedDelta = update.completed
+          ? boundedDelta
+          : Math.min(boundedDelta, MAX_HEARTBEAT_DELTA_SECONDS)
+        const nextWatchedSeconds = Math.min(durationSeconds, currentProgress.watchedSeconds + acceptedDelta)
+        const nextFurthest = Math.max(
+          currentProgress.furthestSecond,
+          Math.min(durationSeconds, boundedPosition),
+        )
+        const completionThresholdSeconds = Math.max(1, Math.floor(durationSeconds * 0.99))
+        const completedByWatch = nextWatchedSeconds >= completionThresholdSeconds
+        const completionByExplicitSignal =
+          Boolean(update.completed) &&
+          nextFurthest >= completionThresholdSeconds &&
+          nextWatchedSeconds >= Math.max(1, Math.floor(durationSeconds * 0.9))
+        const completed = currentProgress.completed || completedByWatch || completionByExplicitSignal
+
+        const nextVideoProgress: VideoWatchProgress = {
+          ...currentProgress,
+          durationSeconds,
+          watchedSeconds: nextWatchedSeconds,
+          furthestSecond: nextFurthest,
+          lastPositionSecond: Math.min(durationSeconds, boundedPosition),
+          completed,
+          pausedCount: currentProgress.pausedCount + (update.paused ? 1 : 0),
+          resumedCount: currentProgress.resumedCount + (update.resumed ? 1 : 0),
+          seekViolations: currentProgress.seekViolations + (inferredSeekViolation ? 1 : 0),
+          lastUpdatedAt: nowIso,
+        }
+
+        const watchedMinutes = Math.min(course.videoMinutes, Math.round((nextWatchedSeconds / 60) * 100) / 100)
+
         const nextEnrollments = prev.enrollments.map((item) =>
-          item.id === enrollment.id
+          item.id === targetEnrollment.id
             ? {
                 ...item,
-                watchedSegmentIds: [...item.watchedSegmentIds, segmentId],
-                watchedMinutes: Math.min(course.videoMinutes, item.watchedMinutes + segment.durationMinutes),
+                videoProgress: nextVideoProgress,
+                watchedMinutes,
               }
             : item,
         )
-
-        const updated = nextEnrollments.find((item) => item.id === enrollment.id)
+        const updated = nextEnrollments.find((item) => item.id === targetEnrollment.id)
         if (!updated) return prev
 
         const progressKey = `${currentUser.id}::${courseId}`
@@ -394,13 +576,41 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
           [progressKey]: {
             userId: currentUser.id,
             courseId,
-            watchedSegmentIds: updated.watchedSegmentIds,
             watchedMinutes: updated.watchedMinutes,
-            lastWatchedAt: new Date().toISOString(),
+            lastWatchedAt: nowIso,
           },
         }
 
-        const draft = { ...prev, enrollments: nextEnrollments, progress: nextProgress }
+        const eventType: LearningActivityEvent['type'] = update.seekViolation
+          || inferredSeekViolation
+          ? 'seek_violation'
+          : update.paused
+            ? 'pause'
+            : update.resumed
+              ? 'resume'
+              : completed && !currentProgress.completed
+                ? 'video_complete'
+                : 'heartbeat'
+
+        const nextActivityLog = [
+          ...prev.learningActivityLog,
+          {
+            id: createId('act'),
+            userId: currentUser.id,
+            courseId,
+            type: eventType,
+            at: nowIso,
+            positionSecond: nextVideoProgress.lastPositionSecond,
+            watchedSeconds: nextVideoProgress.watchedSeconds,
+          },
+        ]
+
+        const draft = {
+          ...prev,
+          enrollments: nextEnrollments,
+          progress: nextProgress,
+          learningActivityLog: nextActivityLog,
+        }
         return appendCompletionArtifacts(draft, updated)
       })
 
@@ -409,14 +619,39 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
     [currentUser, state.courses, getActiveEnrollment, appendCompletionArtifacts],
   )
 
+  const markVideoWatched = useCallback(
+    (courseId: string): ActionResult => {
+      const course = state.courses.find((entry) => entry.id === courseId)
+      if (!course) return { ok: false, message: 'Course not found.' }
+      const durationSeconds = Math.max(1, Math.round(course.videoMinutes * 60))
+      return recordVideoPlayback(courseId, {
+        positionSecond: durationSeconds,
+        durationSeconds,
+        watchedDeltaSeconds: durationSeconds,
+        isPlaying: false,
+        completed: true,
+      })
+    },
+    [state.courses, recordVideoPlayback],
+  )
+
   const submitQuizAttempt = useCallback(
-    (courseId: string, answers: Record<string, string>): QuizAttempt | null => {
+    (
+      courseId: string,
+      renderedQuestions: QuizQuestion[],
+      answers: Record<string, string>,
+    ): QuizAttempt | null => {
       if (!currentUser) return null
       const course = state.courses.find((entry) => entry.id === courseId)
       if (!course) return null
 
       const enrollment = getActiveEnrollment(currentUser.id, courseId)
       if (!enrollment) return null
+      const watchedPercent = getWatchedPercentFromEnrollment(course, enrollment)
+      if (watchedPercent < 100) return null
+
+      const policy = ensureQuizPolicy(course)
+      const attemptsQuestions = renderedQuestions.length > 0 ? renderedQuestions : course.quiz
 
       let created: QuizAttempt | null = null
 
@@ -424,16 +659,20 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
         const targetEnrollment = prev.enrollments.find((item) => item.id === enrollment.id)
         if (!targetEnrollment) return prev
 
-        const score = scoreQuizAttempt(course.quiz, answers)
+        const score = scoreQuizAttempt(attemptsQuestions, answers)
         const attempt: QuizAttempt = {
           id: createId('qa'),
           userId: currentUser.id,
           courseId,
           answers,
           scorePercent: score,
-          passed: score >= REQUIRED_PASSING_SCORE,
+          passed: score >= policy.passThreshold,
           submittedAt: new Date().toISOString(),
           attemptNumber: targetEnrollment.quizAttempts.length + 1,
+          passThreshold: policy.passThreshold,
+          renderedQuestions: attemptsQuestions,
+          generatedQuestionCount: policy.generatedQuestionCount,
+          shownQuestionCount: attemptsQuestions.length,
         }
         created = attempt
 
@@ -453,32 +692,276 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
     [currentUser, state.courses, getActiveEnrollment, appendCompletionArtifacts],
   )
 
-  const updateCourseSegmentMux = useCallback(
+  const updateCourseQuiz = useCallback(
+    (courseId: string, questionBank: QuizQuestion[], policy: QuizPolicy): ActionResult => {
+      if (!currentUser || !currentUserRole) return { ok: false, message: 'Please sign in.' }
+      const course = state.courses.find((entry) => entry.id === courseId)
+      if (!course) return { ok: false, message: 'Course not found.' }
+      if (!canManageCourseMux(currentUserRole, course, currentUser.id)) {
+        return { ok: false, message: 'You do not have permission to edit this course.' }
+      }
+      const now = new Date().toISOString()
+      const normalizedQuestions = questionBank.map((question, questionIndex) => {
+        const options = question.options.slice(0, 4).map((option, optionIndex) => ({
+          ...option,
+          id: option.id || createQuestionOptionId(questionIndex, optionIndex),
+          label: option.label.trim(),
+        }))
+        const hasCorrect = options.some((option) => option.isCorrect)
+        return {
+          ...question,
+          id: question.id || createQuestionId(courseId, questionIndex),
+          prompt: question.prompt.trim(),
+          options: hasCorrect
+            ? options
+            : options.map((option, optionIndex) => ({ ...option, isCorrect: optionIndex === 0 })),
+        }
+      })
+      const nextCourse: Course = {
+        ...course,
+        updatedAt: now,
+        quiz: normalizedQuestions,
+        quizPolicy: {
+          ...policy,
+          generatedAt: policy.generatedAt || now,
+          generatedQuestionCount: Math.max(normalizedQuestions.length, policy.generatedQuestionCount),
+          shownQuestionCount: Math.min(
+            Math.max(1, normalizedQuestions.length),
+            Math.max(1, policy.shownQuestionCount),
+          ),
+          passThreshold: policy.passThreshold,
+        },
+      }
+      setState((prev) => ({
+        ...prev,
+        courses: prev.courses.map((entry) => (entry.id === courseId ? nextCourse : entry)),
+      }))
+      if (getSupabaseBrowserClient()) {
+        void persistCourseToSupabase(nextCourse).then((r) => {
+            if (!r.ok) setCoursesSyncMessage(`Could not save this course: ${r.message}`)
+        })
+      }
+      return { ok: true }
+    },
+    [currentUser, currentUserRole, state.courses],
+  )
+
+  const deleteCourseQuizQuestion = useCallback(
+    (courseId: string, questionId: string): ActionResult => {
+      if (!currentUser || !currentUserRole) return { ok: false, message: 'Please sign in.' }
+      const course = state.courses.find((entry) => entry.id === courseId)
+      if (!course) return { ok: false, message: 'Course not found.' }
+      if (!canManageCourseMux(currentUserRole, course, currentUser.id)) {
+        return { ok: false, message: 'You do not have permission to edit this course.' }
+      }
+      const policy = ensureQuizPolicy(course)
+      const minRequired = Math.max(policy.shownQuestionCount, 6)
+      const nextQuiz = course.quiz.filter((question) => question.id !== questionId)
+      if (nextQuiz.length < minRequired) {
+        return {
+          ok: false,
+          message: `Cannot drop below ${minRequired} questions. Regenerate or reduce shown question policy first.`,
+        }
+      }
+
+      const nextCourse: Course = {
+        ...course,
+        updatedAt: new Date().toISOString(),
+        quiz: nextQuiz,
+        quizPolicy: {
+          ...policy,
+          generatedQuestionCount: Math.max(nextQuiz.length, policy.generatedQuestionCount),
+          shownQuestionCount: Math.min(policy.shownQuestionCount, nextQuiz.length),
+        },
+      }
+      setState((prev) => ({
+        ...prev,
+        courses: prev.courses.map((entry) => (entry.id === courseId ? nextCourse : entry)),
+      }))
+      if (getSupabaseBrowserClient()) {
+        void persistCourseToSupabase(nextCourse).then((r) => {
+            if (!r.ok) setCoursesSyncMessage(`Could not save this course: ${r.message}`)
+        })
+      }
+      return { ok: true }
+    },
+    [currentUser, currentUserRole, state.courses],
+  )
+
+  const createCourse = useCallback(
+    (input: CreateCourseInput): { ok: true; course: Course } | { ok: false; message: string } => {
+      if (!currentUser || !canAuthorCourses(currentUserRole)) {
+        return { ok: false, message: 'You do not have permission to create courses.' }
+      }
+
+      const title = input.title.trim()
+      if (!title) return { ok: false, message: 'Course title is required.' }
+
+      const now = new Date().toISOString()
+      const totalMinutes = Math.max(1, Math.round(input.videoMinutes ?? 15))
+
+      const course: Course = {
+        id: createId('crs'),
+        title,
+        summary: input.summary.trim() || 'New course',
+        description: input.description.trim() || input.summary.trim() || title,
+        category: input.category.trim() || 'General',
+        topic: input.topic,
+        level: input.level,
+        instructorId:
+          currentUser.role === 'instructor'
+            ? currentUser.id
+            : input.instructorId?.trim() || currentUser.id,
+        status: 'draft',
+        videoMinutes: totalMinutes,
+        cpdHoursOverride: null,
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+        muxStatus: 'idle',
+        transcriptStatus: 'idle',
+        quiz: input.quiz ?? [],
+        quizPolicy: buildQuizPolicy(totalMinutes),
+      }
+
+      setState((prev) => ({ ...prev, courses: [course, ...prev.courses] }))
+      if (getSupabaseBrowserClient()) {
+        void persistCourseToSupabase(course).then((r) => {
+          if (!r.ok) {
+            setCoursesSyncMessage(`Could not save this course: ${r.message}`)
+          }
+        })
+      }
+      return { ok: true, course }
+    },
+    [currentUser, currentUserRole],
+  )
+
+  const updateCourseDetails = useCallback(
+    (courseId: string, input: UpdateCourseInput): ActionResult => {
+      if (!currentUser || !currentUserRole) {
+        return { ok: false, message: 'Please sign in.' }
+      }
+
+      const course = state.courses.find((entry) => entry.id === courseId)
+      if (!course) return { ok: false, message: 'Course not found.' }
+      if (!canManageCourseMux(currentUserRole, course, currentUser.id)) {
+        return { ok: false, message: 'You do not have permission to edit this course.' }
+      }
+
+      const next = sanitizeCourseDetails(input)
+      if (!next.title) return { ok: false, message: 'Course title is required.' }
+      if (!next.summary) return { ok: false, message: 'Course summary is required.' }
+      if (!next.description) return { ok: false, message: 'Course description is required.' }
+      if (!next.category) return { ok: false, message: 'Course category is required.' }
+
+      const now = new Date().toISOString()
+      const nextInstructorId =
+        currentUserRole === 'content_admin' || currentUserRole === 'super_admin'
+          ? next.instructorId || course.instructorId
+          : course.instructorId
+      const nextCourse: Course = {
+        ...course,
+        title: next.title,
+        summary: next.summary,
+        description: next.description,
+        category: next.category,
+        topic: next.topic,
+        level: next.level,
+        instructorId: nextInstructorId,
+        updatedAt: now,
+      }
+
+      setState((prev) => ({
+        ...prev,
+        courses: prev.courses.map((entry) => (entry.id === courseId ? nextCourse : entry)),
+      }))
+      if (getSupabaseBrowserClient()) {
+        void persistCourseToSupabase(nextCourse).then((r) => {
+          if (!r.ok) {
+            setCoursesSyncMessage(`Could not save this course: ${r.message}`)
+          }
+        })
+      }
+      return { ok: true }
+    },
+    [currentUser, currentUserRole, state.courses],
+  )
+
+  const deleteDraftCourse = useCallback(
+    async (courseId: string): Promise<ActionResult> => {
+      if (!currentUser || !currentUserRole) {
+        return { ok: false, message: 'Please sign in.' }
+      }
+
+      const course = state.courses.find((entry) => entry.id === courseId)
+      if (!course) return { ok: false, message: 'Course not found.' }
+      if (course.status !== 'draft') {
+        return { ok: false, message: 'Only draft courses can be deleted here.' }
+      }
+      if (!canManageCourseMux(currentUserRole, course, currentUser.id)) {
+        return { ok: false, message: 'You do not have permission to delete this course.' }
+      }
+
+      const sb = getSupabaseBrowserClient()
+      if (sb) {
+        const remote = await deleteCourseFromSupabase(courseId)
+        if (!remote.ok) {
+          setCoursesSyncMessage(`Could not delete this course: ${remote.message}`)
+          return { ok: false, message: remote.message }
+        }
+      }
+
+      setVideoProcessingProgress((prev) => {
+        if (!(courseId in prev)) return prev
+        const rest = { ...prev }
+        delete rest[courseId]
+        return rest
+      })
+
+      setState((prev) => ({
+        ...prev,
+        courses: prev.courses.filter((c) => c.id !== courseId),
+      }))
+      return { ok: true }
+    },
+    [currentUser, currentUserRole, state.courses],
+  )
+
+  const updateCourseVideo = useCallback(
     (
       courseId: string,
-      segmentId: string,
       mux: Partial<
         Pick<
-          CourseSegment,
-          'muxUploadId' | 'muxAssetId' | 'muxPlaybackId' | 'muxStatus' | 'muxErrorMessage'
+          Course,
+          | 'muxUploadId'
+          | 'muxAssetId'
+          | 'muxPlaybackId'
+          | 'muxStatus'
+          | 'muxErrorMessage'
+          | 'transcript'
+          | 'transcriptText'
+          | 'transcriptStatus'
+          | 'transcriptErrorMessage'
+          | 'videoMinutes'
         >
       >,
     ) => {
       setState((prev) => {
         const course = prev.courses.find((c) => c.id === courseId)
         if (!course) return prev
+        if (!canManageCourseMux(currentUserRole, course, currentUserId)) return prev
         const now = new Date().toISOString()
         const nextCourse: Course = {
           ...course,
+          ...mux,
           updatedAt: now,
-          segments: course.segments.map((segment) =>
-            segment.id !== segmentId ? segment : { ...segment, ...mux },
-          ),
+          videoMinutes: Math.max(1, Math.round(mux.videoMinutes ?? course.videoMinutes)),
         }
         if (getSupabaseBrowserClient()) {
           void persistCourseToSupabase(nextCourse).then((r) => {
             if (!r.ok) {
-              setCoursesSyncMessage(`Could not save course to Supabase: ${r.message}`)
+              setCoursesSyncMessage(`Could not save this course: ${r.message}`)
             }
           })
         }
@@ -488,7 +971,7 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
         }
       })
     },
-    [],
+    [currentUserRole, currentUserId],
   )
 
   const transitionCourseStatus = useCallback(
@@ -520,7 +1003,7 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
         if (getSupabaseBrowserClient()) {
           void persistCourseToSupabase(nextCourse).then((r) => {
             if (!r.ok) {
-              setCoursesSyncMessage(`Could not save course to Supabase: ${r.message}`)
+              setCoursesSyncMessage(`Could not save this course: ${r.message}`)
             }
           })
         }
@@ -591,10 +1074,16 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       acceptInvite,
       suspendUser,
       enrollInCourse,
-      markSegmentWatched,
+      markVideoWatched,
+      recordVideoPlayback,
       submitQuizAttempt,
+      updateCourseQuiz,
+      deleteCourseQuizQuestion,
+      createCourse,
+      updateCourseDetails,
+      deleteDraftCourse,
       transitionCourseStatus,
-      updateCourseSegmentMux,
+      updateCourseVideo,
       toggleWebinarAttendance,
       getCourseReadiness,
       getActiveEnrollment,
@@ -602,6 +1091,10 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       coursesSyncStatus,
       coursesSyncMessage,
       clearCoursesSyncMessage,
+      videoProcessingProgress,
+      setVideoUploadProgress,
+      setVideoTranscriptionProgress,
+      clearVideoProcessingProgress,
     }),
     [
       state,
@@ -613,10 +1106,16 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       acceptInvite,
       suspendUser,
       enrollInCourse,
-      markSegmentWatched,
+      markVideoWatched,
+      recordVideoPlayback,
       submitQuizAttempt,
+      updateCourseQuiz,
+      deleteCourseQuizQuestion,
+      createCourse,
+      updateCourseDetails,
+      deleteDraftCourse,
       transitionCourseStatus,
-      updateCourseSegmentMux,
+      updateCourseVideo,
       toggleWebinarAttendance,
       getCourseReadiness,
       getActiveEnrollment,
@@ -624,6 +1123,10 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       coursesSyncStatus,
       coursesSyncMessage,
       clearCoursesSyncMessage,
+      videoProcessingProgress,
+      setVideoUploadProgress,
+      setVideoTranscriptionProgress,
+      clearVideoProcessingProgress,
     ],
   )
 

@@ -1,14 +1,25 @@
 import { Link, NavLink, Outlet } from 'react-router-dom'
+import { useCurrentUser } from '../../hooks/useAppStore'
 import { CourseSyncBanner } from '../common/CourseSyncBanner'
+import type { UserRole } from '../../types'
 
-const links = [
+const courseRoles: UserRole[] = ['instructor', 'content_admin', 'super_admin']
+const peopleRoles: UserRole[] = ['hr_admin', 'super_admin']
+
+const links: { label: string; to: string; roles?: UserRole[] }[] = [
   { label: 'Overview', to: '/admin' },
-  { label: 'Course Workflow', to: '/admin/courses' },
-  { label: 'User Management', to: '/admin/users' },
-  { label: 'Reporting', to: '/admin/reports' },
+  { label: 'Courses', to: '/admin/courses', roles: courseRoles },
+  { label: 'Invite Operations', to: '/admin/invites', roles: peopleRoles },
+  { label: 'User Management', to: '/admin/users', roles: peopleRoles },
+  { label: 'Report Snapshot', to: '/admin/reports/snapshot' },
+  { label: 'Report Completions', to: '/admin/reports/completions' },
+  { label: 'Report Progress', to: '/admin/reports/progress' },
 ]
 
 export function AdminLayout() {
+  const user = useCurrentUser()
+  const visibleLinks = links.filter((link) => !link.roles || (user ? link.roles.includes(user.role) : false))
+
   return (
     <div className="app-shell app-shell--admin">
       <aside className="sidebar sidebar--admin">
@@ -21,7 +32,7 @@ export function AdminLayout() {
           <nav className="side-nav side-nav--admin">
             <div className="side-nav__group">
               <p className="side-nav__label">Operations</p>
-              {links.map((link) => (
+              {visibleLinks.map((link) => (
                 <NavLink key={link.to} to={link.to} end={link.to === '/admin'}>
                   {link.label}
                 </NavLink>

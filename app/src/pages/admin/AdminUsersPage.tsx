@@ -1,66 +1,18 @@
 import { useAppStore } from '../../hooks/useAppStore'
-import type { UserRole } from '../../types'
-
-const roleOptions: UserRole[] = ['learner', 'instructor', 'content_admin', 'hr_admin', 'super_admin']
+import { Link } from 'react-router-dom'
 
 export function AdminUsersPage() {
-  const { users, inviteUser, suspendUser } = useAppStore()
+  const { users, suspendUser } = useAppStore()
 
   return (
     <section className="page admin-users-page">
       <header className="page-header">
         <p className="section-eyebrow">Admin · People operations</p>
-        <h1>Users and invites</h1>
+        <h1>Manage active access</h1>
         <p className="page-subtitle">
-          Keep access tightly controlled while making onboarding easy for invited learners and staff.
+          This page is only for access control: review user status and suspend or reactivate accounts.
         </p>
       </header>
-
-      <section className="admin-section admin-section--split">
-        <div className="admin-section-intro">
-          <p className="section-eyebrow">Issue invite</p>
-          <h2>Start with the person, then assign the role.</h2>
-          <p className="section-copy">
-            New access should feel deliberate. Capture only the essentials and keep the directory close by.
-          </p>
-        </div>
-
-        <div className="admin-form-shell">
-          <form
-            className="inline-form admin-inline-form"
-            onSubmit={(event) => {
-              event.preventDefault()
-              const form = new FormData(event.currentTarget)
-              const email = String(form.get('email') ?? '').trim()
-              const fullName = String(form.get('fullName') ?? '').trim()
-              const role = String(form.get('role') ?? 'learner') as UserRole
-              if (!email || !fullName) return
-              inviteUser(email, fullName, role)
-              event.currentTarget.reset()
-            }}
-          >
-            <label>
-              Full name
-              <input name="fullName" placeholder="Full name" required />
-            </label>
-            <label>
-              Email
-              <input name="email" placeholder="Email" type="email" required />
-            </label>
-            <label>
-              Role
-              <select name="role" defaultValue="learner">
-                {roleOptions.map((role) => (
-                  <option key={role} value={role}>
-                    {role.replace('_', ' ')}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button type="submit">Send invite</button>
-          </form>
-        </div>
-      </section>
 
       <section className="admin-section">
         <div className="admin-section-head">
@@ -68,6 +20,9 @@ export function AdminUsersPage() {
             <p className="section-eyebrow">Directory</p>
             <h2>Current access roster</h2>
           </div>
+          <Link to="/admin/invites" className="link-button">
+            Go to invite operations
+          </Link>
         </div>
 
         <div className="table-card table-card--quiet">

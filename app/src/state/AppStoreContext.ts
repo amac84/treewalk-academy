@@ -1,11 +1,15 @@
 import { createContext } from 'react'
 import type {
   AppState,
-  CourseSegment,
+  Course,
+  CourseLevel,
   CoursesSyncStatus,
   CourseStatus,
+  CourseTopic,
   Enrollment,
   Invite,
+  QuizPolicy,
+  QuizQuestion,
   QuizAttempt,
   User,
   UserRole,
@@ -15,6 +19,55 @@ import type { evaluateCompletion } from '../lib/courseLogic'
 interface ActionResult {
   ok: boolean
   message?: string
+}
+
+export interface VideoPlaybackUpdateInput {
+  positionSecond: number
+  durationSeconds: number
+  watchedDeltaSeconds: number
+  isPlaying: boolean
+  paused?: boolean
+  resumed?: boolean
+  seekViolation?: boolean
+  completed?: boolean
+}
+
+export type VideoUploadProgress = {
+  loaded: number
+  total: number
+  startedAt: number
+}
+
+export type VideoTranscriptionProgress = {
+  phase: 'extracting_audio' | 'transcribing'
+  extractRatio: number | null
+}
+
+export type VideoProcessingProgress = {
+  upload?: VideoUploadProgress
+  transcription?: VideoTranscriptionProgress
+}
+
+export interface CreateCourseInput {
+  title: string
+  summary: string
+  description: string
+  category: string
+  topic: CourseTopic
+  level: CourseLevel
+  instructorId?: string
+  videoMinutes?: number
+  quiz?: QuizQuestion[]
+}
+
+export interface UpdateCourseInput {
+  title: string
+  summary: string
+  description: string
+  category: string
+  topic: CourseTopic
+  level: CourseLevel
+  instructorId?: string
 }
 
 export interface AppStoreContextValue extends AppState {
@@ -28,16 +81,38 @@ export interface AppStoreContextValue extends AppState {
   acceptInvite: (code: string) => { ok: true; user: User } | { ok: false; error: string }
   suspendUser: (userId: string, suspended?: boolean) => void
   enrollInCourse: (courseId: string) => ActionResult
-  markSegmentWatched: (courseId: string, segmentId: string) => ActionResult
-  submitQuizAttempt: (courseId: string, answers: Record<string, string>) => QuizAttempt | null
-  transitionCourseStatus: (courseId: string, nextStatus: CourseStatus) => ActionResult
-  updateCourseSegmentMux: (
+  markVideoWatched: (courseId: string) => ActionResult
+  recordVideoPlayback: (courseId: string, update: VideoPlaybackUpdateInput) => ActionResult
+  submitQuizAttempt: (
     courseId: string,
-    segmentId: string,
+    renderedQuestions: QuizQuestion[],
+    answers: Record<string, string>,
+  ) => QuizAttempt | null
+  updateCourseQuiz: (
+    courseId: string,
+    questionBank: QuizQuestion[],
+    policy: QuizPolicy,
+  ) => ActionResult
+  deleteCourseQuizQuestion: (courseId: string, questionId: string) => ActionResult
+  createCourse: (input: CreateCourseInput) => { ok: true; course: Course } | { ok: false; message: string }
+  updateCourseDetails: (courseId: string, input: UpdateCourseInput) => ActionResult
+  deleteDraftCourse: (courseId: string) => Promise<ActionResult>
+  transitionCourseStatus: (courseId: string, nextStatus: CourseStatus) => ActionResult
+  updateCourseVideo: (
+    courseId: string,
     mux: Partial<
       Pick<
-        CourseSegment,
-        'muxUploadId' | 'muxAssetId' | 'muxPlaybackId' | 'muxStatus' | 'muxErrorMessage'
+        Course,
+        | 'muxUploadId'
+        | 'muxAssetId'
+        | 'muxPlaybackId'
+        | 'muxStatus'
+        | 'muxErrorMessage'
+        | 'transcript'
+        | 'transcriptText'
+        | 'transcriptStatus'
+        | 'transcriptErrorMessage'
+        | 'videoMinutes'
       >
     >,
   ) => void
@@ -48,6 +123,16 @@ export interface AppStoreContextValue extends AppState {
   coursesSyncStatus: CoursesSyncStatus
   coursesSyncMessage: string | null
   clearCoursesSyncMessage: () => void
+  videoProcessingProgress: Record<string, VideoProcessingProgress>
+  setVideoUploadProgress: (
+    courseId: string,
+    progress: VideoUploadProgress | null,
+  ) => void
+  setVideoTranscriptionProgress: (
+    courseId: string,
+    progress: VideoTranscriptionProgress | null,
+  ) => void
+  clearVideoProcessingProgress: (courseId: string) => void
 }
 
 export const AppStoreContext = createContext<AppStoreContextValue | undefined>(undefined)
