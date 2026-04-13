@@ -93,7 +93,7 @@ export function AdminCourseCreatePage() {
     if (!isMuxFunctionConfigured()) {
       setError(
         import.meta.env.DEV
-          ? 'Video upload is not configured. Set VITE_MUX_FUNCTION_URL in app/.env to your video upload function URL, then restart the dev server.'
+          ? 'Video upload is not configured. Set VITE_SUPABASE_URL (mux defaults to …/functions/v1/mux) or VITE_MUX_FUNCTION_URL in app/.env, then restart the dev server.'
           : 'Video upload is not set up on this site. Ask your administrator to finish configuration.',
       )
       return
@@ -362,8 +362,9 @@ export function AdminCourseCreatePage() {
             <p className="inline-error small-copy">
               {import.meta.env.DEV ? (
                 <>
-                  Add <code>VITE_MUX_FUNCTION_URL</code> in <code>app/.env</code> (your hosted video upload URL), deploy
-                  that backend if needed, then restart <code>npm run dev</code>.
+                  Set <code>VITE_SUPABASE_URL</code> so the app can call the mux function at{' '}
+                  <code>…/functions/v1/mux</code> on that host, or set <code>VITE_MUX_FUNCTION_URL</code> in{' '}
+                  <code>app/.env</code>. Deploy the mux Edge Function if needed, then restart <code>npm run dev</code>.
                 </>
               ) : (
                 <>Video upload is not configured. Your administrator needs to finish backend setup before you can use this.</>
