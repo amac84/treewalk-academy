@@ -37,13 +37,32 @@ async function prepareFileForTranscription(
   return extractAudioFromVideoForTranscription(file, { onProgress: onExtractProgress })
 }
 
-/** Resolves the video Edge Function URL: explicit env wins, else same project as `VITE_SUPABASE_URL`. */
+/** Same Supabase project as `VITE_FEEDBACK_FUNCTION_URL` when that URL targets *.supabase.co. */
+function supabaseApiOriginFromFeedbackUrl(): string | null {
+  const raw = import.meta.env.VITE_FEEDBACK_FUNCTION_URL?.trim()
+  if (!raw || !/^https?:\/\//i.test(raw)) return null
+  try {
+    const u = new URL(raw)
+    if (!/\.supabase\.co$/i.test(u.hostname)) return null
+    return u.origin
+  } catch {
+    return null
+  }
+}
+
+/** Resolves the video Edge Function URL: explicit env wins, else same Supabase project as URL envs. */
 function resolvedMuxFunctionUrl(): string | null {
   const explicit = import.meta.env.VITE_MUX_FUNCTION_URL?.trim()
   if (explicit) return explicit
   const base = import.meta.env.VITE_SUPABASE_URL?.trim()
-  if (!base) return null
-  return `${base.replace(/\/$/, '')}/functions/v1/mux`
+  if (base) {
+    return `${base.replace(/\/$/, '')}/functions/v1/mux`
+  }
+  const fromFeedback = supabaseApiOriginFromFeedbackUrl()
+  if (fromFeedback) {
+    return `${fromFeedback}/functions/v1/mux`
+  }
+  return null
 }
 
 /** True when the SPA can call the video upload Edge Function (direct upload + transcription). */

@@ -367,7 +367,12 @@ export function AdminCourseCreatePage() {
                   <code>app/.env</code>. Deploy the mux Edge Function if needed, then restart <code>npm run dev</code>.
                 </>
               ) : (
-                <>Video upload is not configured. Your administrator needs to finish backend setup before you can use this.</>
+                <>
+                  Video upload is not configured. Your administrator should set{' '}
+                  <code>VITE_SUPABASE_URL</code> (or <code>VITE_MUX_FUNCTION_URL</code>, or{' '}
+                  <code>VITE_FEEDBACK_FUNCTION_URL</code> pointing at the same Supabase project) in the hosting build
+                  environment, redeploy, and ensure the mux Edge Function is deployed.
+                </>
               )}
             </p>
           ) : null}
