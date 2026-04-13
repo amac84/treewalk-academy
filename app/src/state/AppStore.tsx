@@ -11,6 +11,7 @@ import {
 import { getCourseCPDHours } from '../lib/cpd'
 import { buildQuizPolicy, ensureQuizPolicy } from '../lib/quizPolicy'
 import { getSupabaseBrowserClient } from '../lib/supabaseClient'
+import { syncSupabaseSessionForAuthorRole } from '../lib/supabaseMuxSession'
 import {
   evaluateCompletion,
   getWatchedPercentFromEnrollment,
@@ -270,6 +271,11 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
     [state.users, currentUserId],
   )
   const currentUserRole = currentUser?.role ?? null
+
+  useEffect(() => {
+    if (!getSupabaseBrowserClient()) return
+    void syncSupabaseSessionForAuthorRole(currentUserRole)
+  }, [currentUserRole])
 
   const getActiveEnrollment = useCallback(
     (userId: string, courseId: string): Enrollment | null =>
