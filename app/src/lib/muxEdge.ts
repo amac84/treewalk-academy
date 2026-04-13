@@ -3,7 +3,7 @@ import {
   isVideoLikeForTranscription,
   type ExtractAudioProgress,
 } from './extractAudioForTranscription'
-import { getSupabaseBrowserClient } from './supabaseClient'
+import { ensureMuxSupabaseAccessToken } from './supabaseMuxSession'
 import {
   createStructuredTranscriptFromText,
   getTranscriptPlainText,
@@ -82,38 +82,6 @@ function muxFunctionUrl(): string {
   return url
 }
 
-/**
- * Video upload Edge Function requires a real Supabase user JWT (not the anon key).
- * Demo / mock roles do not create a session, so in dev we sign in anonymously
- * when the project has Anonymous auth enabled (Authentication → Providers).
- */
-async function ensureMuxAccessToken(): Promise<string | null> {
-  const supabase = getSupabaseBrowserClient()
-  if (!supabase) return null
-
-  const { data: first } = await supabase.auth.getSession()
-  if (first.session?.access_token) {
-    return first.session.access_token
-  }
-
-  const allowAnonBootstrap =
-    import.meta.env.DEV || import.meta.env.VITE_SUPABASE_MUX_ANON_FALLBACK === 'true'
-
-  if (!allowAnonBootstrap) return null
-
-  const { error } = await supabase.auth.signInAnonymously()
-  if (error) {
-    console.warn(
-      '[muxEdge] Anonymous sign-in failed — enable Anonymous in Supabase Auth, or use a signed-in account:',
-      error.message,
-    )
-    return null
-  }
-
-  const { data: after } = await supabase.auth.getSession()
-  return after.session?.access_token ?? null
-}
-
 async function authHeaders(): Promise<Headers> {
   const headers = new Headers()
   const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim()
@@ -122,7 +90,7 @@ async function authHeaders(): Promise<Headers> {
     headers.set('X-Client-Info', 'treewalk-academy-mux')
   }
 
-  const token = await ensureMuxAccessToken()
+  const token = await ensureMuxSupabaseAccessToken()
   if (token) {
     headers.set('Authorization', `Bearer ${token}`)
   }
@@ -140,8 +108,8 @@ export async function muxEdgePost(body: Record<string, unknown>): Promise<Record
   if (!headers.get('Authorization')) {
     throw new Error(
       import.meta.env.DEV
-        ? 'Video upload needs a signed-in session. For local demo roles: enable anonymous sign-in in your auth provider, set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY, then reload. (Advanced: MUX_ALLOW_UNAUTHENTICATED on a private dev backend only.)'
-        : 'You must be signed in to upload or process video.',
+        ? 'Video upload needs a Supabase user JWT. For seeded demo roles: enable Anonymous sign-in (Supabase Auth → Providers), set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY, then reload. (Advanced: MUX_ALLOW_UNAUTHENTICATED on a private dev backend only.)'
+        : 'You must be signed in to upload or process video. If you use demo or invite logins, enable Anonymous sign-in in Supabase and redeploy unless VITE_SUPABASE_MUX_ANON_FALLBACK=false.',
     )
   }
 
@@ -320,8 +288,8 @@ export async function transcribeVideoFile(
   if (!headers.get('Authorization')) {
     throw new Error(
       import.meta.env.DEV
-        ? 'Transcription needs a signed-in session. Enable anonymous sign-in for local dev, or use a real account.'
-        : 'You must be signed in to run transcription.',
+        ? 'Transcription needs a Supabase user JWT. Enable Anonymous sign-in in Supabase for local demo roles, or use a real account.'
+        : 'You must be signed in to run transcription. Enable Anonymous sign-in in Supabase for demo/invite pilots unless VITE_SUPABASE_MUX_ANON_FALLBACK=false.',
     )
   }
   const form = new FormData()
