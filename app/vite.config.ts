@@ -18,6 +18,19 @@ function importMetaEnvDefineFromProcess(): Record<string, string> {
     }
     d[`import.meta.env.${key}`] = JSON.stringify(val)
   }
+  // Some hosts only set SUPABASE_URL (no VITE_ prefix) for the Pages build; map the API URL only.
+  if (!d['import.meta.env.VITE_SUPABASE_URL']) {
+    const raw = process.env.SUPABASE_URL?.trim()
+    if (raw && /^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(raw)) {
+      d['import.meta.env.VITE_SUPABASE_URL'] = JSON.stringify(raw.replace(/\/$/, ''))
+    }
+  }
+  if (!d['import.meta.env.VITE_SUPABASE_ANON_KEY']) {
+    const anon = process.env.SUPABASE_ANON_KEY?.trim()
+    if (anon) {
+      d['import.meta.env.VITE_SUPABASE_ANON_KEY'] = JSON.stringify(anon)
+    }
+  }
   return d
 }
 
