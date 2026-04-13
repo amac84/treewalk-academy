@@ -37,17 +37,26 @@ async function prepareFileForTranscription(
   return extractAudioFromVideoForTranscription(file, { onProgress: onExtractProgress })
 }
 
+/** Resolves the video Edge Function URL: explicit env wins, else same project as `VITE_SUPABASE_URL`. */
+function resolvedMuxFunctionUrl(): string | null {
+  const explicit = import.meta.env.VITE_MUX_FUNCTION_URL?.trim()
+  if (explicit) return explicit
+  const base = import.meta.env.VITE_SUPABASE_URL?.trim()
+  if (!base) return null
+  return `${base.replace(/\/$/, '')}/functions/v1/mux`
+}
+
 /** True when the SPA can call the video upload Edge Function (direct upload + transcription). */
 export function isMuxFunctionConfigured(): boolean {
-  return Boolean(import.meta.env.VITE_MUX_FUNCTION_URL?.trim())
+  return Boolean(resolvedMuxFunctionUrl())
 }
 
 function muxFunctionUrl(): string {
-  const url = import.meta.env.VITE_MUX_FUNCTION_URL?.trim()
+  const url = resolvedMuxFunctionUrl()
   if (!url) {
     throw new Error(
       import.meta.env.DEV
-        ? 'Add VITE_MUX_FUNCTION_URL in app/.env (HTTPS URL for your video upload function), then restart npm run dev.'
+        ? 'Add VITE_SUPABASE_URL (and deploy the mux function) or set VITE_MUX_FUNCTION_URL in app/.env, then restart npm run dev.'
         : 'Video upload is not configured for this site.',
     )
   }
