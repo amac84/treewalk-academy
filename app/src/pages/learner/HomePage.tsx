@@ -1,9 +1,14 @@
 import { Link } from 'react-router-dom'
 import { useAppStore } from '../../hooks/useAppStore'
 import { formatCpdHours, getCourseCPDHours } from '../../lib/cpd'
+import { learnerCanAccessCourse } from '../../lib/courseAccess'
 
 export function HomePage() {
   const { currentUser, currentUserId, courses, enrollments, webinars, getCourseReadiness } = useAppStore()
+
+  if (!currentUser) {
+    return null
+  }
 
   const userEnrollments = enrollments.filter((entry) => entry.userId === currentUserId)
 
@@ -17,11 +22,13 @@ export function HomePage() {
       }
     })
     .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+    .filter((entry) => learnerCanAccessCourse(currentUser, entry.course))
     .filter((entry) => !entry.readiness.completed)
     .slice(0, 3)
 
   const recommended = courses
     .filter((course) => course.status === 'published')
+    .filter((course) => learnerCanAccessCourse(currentUser, course))
     .filter((course) => !userEnrollments.some((enrollment) => enrollment.courseId === course.id))
     .slice(0, 4)
 

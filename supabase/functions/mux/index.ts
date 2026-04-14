@@ -3,17 +3,36 @@
  * cheap OpenAI metadata drafting from transcripts (transcription-only actions do not need upload tokens).
  * Secrets: MUX_TOKEN_ID, MUX_TOKEN_SECRET, OPENAI_API_KEY (Edge Function secrets).
  *
+ * Mux asset deletion (`delete_mux_asset`): also set CLERK_SECRET_KEY, SUPABASE_SERVICE_ROLE_KEY
+ * (auto on hosted Supabase), and optionally ACADEMY_SUPER_ADMIN_EMAILS (comma-separated, lowercase)
+ * to mirror SPA super-admin email overrides. Client sends `X-Clerk-Session-Token: <Clerk session JWT>`.
+ *
  * Auth: set MUX_ALLOW_UNAUTHENTICATED=true only for local/dev with the mock UI.
  * Otherwise require Authorization: Bearer <Supabase user JWT>.
  */
 
+import { createClerkClient, verifyToken } from 'npm:@clerk/backend@2.33.1'
 import { COURSE_METADATA_MODEL, COURSE_QUIZ_MODEL } from './openaiConfig.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers':
+    'authorization, x-client-info, apikey, content-type, x-clerk-session-token',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 } as const
+
+const ACADEMY_ROLES = [
+  'learner',
+  'instructor',
+  'content_admin',
+  'hr_admin',
+  'super_admin',
+] as const
+type AcademyRole = (typeof ACADEMY_ROLES)[number]
+
+function isAcademyRole(value: unknown): value is AcademyRole {
+  return typeof value === 'string' && (ACADEMY_ROLES as readonly string[]).includes(value)
+}
 
 type AuthOk = { ok: true; userId: string }
 type AuthErr = { ok: false; response: Response }
@@ -94,6 +113,8 @@ Deno.serve(async (request) => {
         return await handleGetUpload(tokenId, tokenSecret, body)
       case 'get_asset':
         return await handleGetAsset(tokenId, tokenSecret, body)
+      case 'delete_mux_asset':
+        return await handleDeleteMuxAsset(request, tokenId, tokenSecret, body)
       case 'transcribe_file':
         if (!formData) {
           return jsonResponse({ ok: false, error: 'transcribe_file requires multipart/form-data.' }, 400)
@@ -104,13 +125,14 @@ Deno.serve(async (request) => {
           {
             ok: false,
             error:
-              'Unknown action. Use create_direct_upload, get_upload, get_asset, transcribe_file, summarize_transcript, draft_course_metadata, or generate_quiz_bank.',
+              'Unknown action. Use create_direct_upload, get_upload, get_asset, delete_mux_asset, transcribe_file, summarize_transcript, draft_course_metadata, or generate_quiz_bank.',
           },
           400,
         )
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Video service request failed.'
+    console.error('[mux] unhandled error', e)
     return jsonResponse({ ok: false, error: msg }, 502)
   }
 })
@@ -182,12 +204,14 @@ async function handleCreateDirectUpload(
     body: JSON.stringify(payload),
   })
 
-  const json = (await res.json()) as MuxEnvelope<{ id?: string; url?: string; status?: string }>
+  const parsed = (await res.json().catch(() => ({}))) as Record<string, unknown>
   if (!res.ok) {
-    const err = json.errors?.[0]?.message ?? json.error ?? `Video provider error (${res.status})`
+    const err = formatMuxApiErrorMessage(parsed, res.status)
+    console.warn('[mux] create_direct_upload Mux HTTP', res.status, err)
     return jsonResponse({ ok: false, error: err }, 502)
   }
 
+  const json = parsed as MuxEnvelope<{ id?: string; url?: string; status?: string }>
   const data = json.data
   if (!data?.id || !data?.url) {
     return jsonResponse({ ok: false, error: 'Video service did not return upload details.' }, 502)
@@ -212,18 +236,19 @@ async function handleGetUpload(
   }
 
   const res = await muxFetch(tokenId, tokenSecret, `/video/v1/uploads/${encodeURIComponent(uploadId)}`)
-  const json = (await res.json()) as MuxEnvelope<{
+  const parsed = (await res.json().catch(() => ({}))) as Record<string, unknown>
+  if (!res.ok) {
+    const err = formatMuxApiErrorMessage(parsed, res.status)
+    console.warn('[mux] get_upload Mux HTTP', res.status, err)
+    return jsonResponse({ ok: false, error: err }, 502)
+  }
+
+  const json = parsed as MuxEnvelope<{
     id?: string
     status?: string
     asset_id?: string
     error?: { type?: string; messages?: string[] }
   }>
-
-  if (!res.ok) {
-    const err = json.errors?.[0]?.message ?? `Video provider error (${res.status})`
-    return jsonResponse({ ok: false, error: err }, 502)
-  }
-
   const data = json.data
   return jsonResponse({
     ok: true,
@@ -245,19 +270,20 @@ async function handleGetAsset(
   }
 
   const res = await muxFetch(tokenId, tokenSecret, `/video/v1/assets/${encodeURIComponent(assetId)}`)
-  const json = (await res.json()) as MuxEnvelope<{
+  const parsed = (await res.json().catch(() => ({}))) as Record<string, unknown>
+  if (!res.ok) {
+    const err = formatMuxApiErrorMessage(parsed, res.status)
+    console.warn('[mux] get_asset Mux HTTP', res.status, err)
+    return jsonResponse({ ok: false, error: err }, 502)
+  }
+
+  const json = parsed as MuxEnvelope<{
     id?: string
     status?: string
     duration?: number
     playback_ids?: Array<{ id?: string; policy?: string }>
     errors?: unknown
   }>
-
-  if (!res.ok) {
-    const err = json.errors?.[0]?.message ?? `Video provider error (${res.status})`
-    return jsonResponse({ ok: false, error: err }, 502)
-  }
-
   const data = json.data
   const playbackId = data?.playback_ids?.[0]?.id ?? null
   const durationSeconds =
@@ -275,9 +301,218 @@ async function handleGetAsset(
   })
 }
 
+async function courseOwnsMuxAsset(
+  courseId: string,
+  clerkInstructorId: string,
+  assetId: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const url = Deno.env.get('SUPABASE_URL')
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  if (!url || !serviceKey) {
+    return {
+      ok: false,
+      reason:
+        'Server is missing SUPABASE_SERVICE_ROLE_KEY, so instructor ownership cannot be verified. Add the default service role secret to the mux function.',
+    }
+  }
+  const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2.49.1')
+  const sb = createClient(url, serviceKey)
+  const { data, error } = await sb.from('academy_courses').select('data').eq('id', courseId).maybeSingle()
+  if (error) {
+    console.warn('[mux] course lookup for delete auth', error.message)
+    return { ok: false, reason: 'Could not verify course ownership.' }
+  }
+  const row = data?.data as Record<string, unknown> | undefined
+  if (!row || typeof row !== 'object') {
+    return { ok: false, reason: 'Course not found.' }
+  }
+  const mux = typeof row.muxAssetId === 'string' ? row.muxAssetId.trim() : ''
+  const instructor = typeof row.instructorId === 'string' ? row.instructorId.trim() : ''
+  if (mux !== assetId) {
+    return { ok: false, reason: 'That Mux asset is not linked to this course.' }
+  }
+  if (!instructor || instructor !== clerkInstructorId) {
+    return { ok: false, reason: 'Only the assigned instructor can delete this hosted video.' }
+  }
+  return { ok: true }
+}
+
+function academyRoleFromClerkUser(
+  emailLower: string,
+  superAdminEmails: Set<string>,
+  publicMetadata: Record<string, unknown>,
+): AcademyRole {
+  if (emailLower && superAdminEmails.has(emailLower)) return 'super_admin'
+  const raw = publicMetadata.academyRole ?? publicMetadata.role
+  if (isAcademyRole(raw)) return raw
+  return 'learner'
+}
+
+async function authorizeMuxAssetDeletion(
+  request: Request,
+  body: Record<string, unknown>,
+): Promise<{ ok: true; role: AcademyRole } | { ok: false; response: Response }> {
+  const clerkSecret = Deno.env.get('CLERK_SECRET_KEY')
+  const clerkToken = request.headers.get('x-clerk-session-token')?.trim()
+  if (!clerkSecret) {
+    return {
+      ok: false,
+      response: jsonResponse(
+        {
+          ok: false,
+          error:
+            'Mux delete is not configured: set CLERK_SECRET_KEY on the mux Edge Function (Supabase → Edge Functions → mux → Secrets).',
+        },
+        503,
+      ),
+    }
+  }
+  if (!clerkToken) {
+    return {
+      ok: false,
+      response: jsonResponse(
+        {
+          ok: false,
+          error: 'Missing X-Clerk-Session-Token. Sign in with Clerk, then try again.',
+        },
+        401,
+      ),
+    }
+  }
+
+  let payload: { sub?: string }
+  try {
+    payload = (await verifyToken(clerkToken, { secretKey: clerkSecret })) as { sub?: string }
+  } catch (e) {
+    console.warn('[mux] Clerk verifyToken failed', e instanceof Error ? e.message : e)
+    return {
+      ok: false,
+      response: jsonResponse({ ok: false, error: 'Invalid or expired Clerk session.' }, 401),
+    }
+  }
+
+  const clerkUserId = typeof payload.sub === 'string' ? payload.sub.trim() : ''
+  if (!clerkUserId) {
+    return { ok: false, response: jsonResponse({ ok: false, error: 'Clerk token missing user id.' }, 401) }
+  }
+
+  const clerk = createClerkClient({ secretKey: clerkSecret })
+  let user
+  try {
+    user = await clerk.users.getUser(clerkUserId)
+  } catch (e) {
+    console.error('[mux] clerk.users.getUser failed', e)
+    return {
+      ok: false,
+      response: jsonResponse({ ok: false, error: 'Could not load Clerk profile for authorization.' }, 502),
+    }
+  }
+
+  const primaryId = user.primaryEmailAddressId
+  const primaryEmail =
+    primaryId && Array.isArray(user.emailAddresses)
+      ? user.emailAddresses.find((entry: { id: string; emailAddress?: string | null }) => entry.id === primaryId)
+          ?.emailAddress
+      : undefined
+  const emailLower = (primaryEmail ?? user.emailAddresses?.[0]?.emailAddress ?? '')
+    .trim()
+    .toLowerCase()
+
+  const superList = (Deno.env.get('ACADEMY_SUPER_ADMIN_EMAILS') ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+  const superSet = new Set(superList)
+
+  const meta = (user.publicMetadata ?? {}) as Record<string, unknown>
+  const role = academyRoleFromClerkUser(emailLower, superSet, meta)
+
+  if (role === 'super_admin' || role === 'content_admin') {
+    return { ok: true, role }
+  }
+
+  if (role === 'instructor') {
+    const courseId = typeof body.course_id === 'string' ? body.course_id.trim() : ''
+    const assetId = typeof body.asset_id === 'string' ? body.asset_id.trim() : ''
+    if (!courseId) {
+      return {
+        ok: false,
+        response: jsonResponse(
+          { ok: false, error: 'Instructors must pass course_id when deleting a hosted Mux asset.' },
+          403,
+        ),
+      }
+    }
+    const own = await courseOwnsMuxAsset(courseId, clerkUserId, assetId)
+    if (!own.ok) {
+      return { ok: false, response: jsonResponse({ ok: false, error: own.reason }, 403) }
+    }
+    return { ok: true, role }
+  }
+
+  const learnerHint =
+    role === 'learner'
+      ? ' The SPA can promote you via superAdminEmails in app-settings.json, but this Edge Function only sees Clerk metadata unless you set the mux secret ACADEMY_SUPER_ADMIN_EMAILS to the same comma-separated emails (Supabase Dashboard → Edge Functions → Secrets), or set Clerk user public metadata { "academyRole": "content_admin" } or "super_admin".'
+      : ''
+
+  return {
+    ok: false,
+    response: jsonResponse(
+      {
+        ok: false,
+        error: `Your role (${role}) cannot delete Mux assets here. Allowed: content_admin, super_admin (any asset), or instructor (only if course_id matches a course you own in the database).${learnerHint}`,
+      },
+      403,
+    ),
+  }
+}
+
+async function handleDeleteMuxAsset(
+  request: Request,
+  tokenId: string,
+  tokenSecret: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const assetId = typeof body.asset_id === 'string' ? body.asset_id.trim() : ''
+  if (!assetId) {
+    return jsonResponse({ ok: false, error: 'asset_id is required.' }, 400)
+  }
+
+  const authz = await authorizeMuxAssetDeletion(request, body)
+  if (!authz.ok) {
+    return authz.response
+  }
+
+  const res = await muxFetch(tokenId, tokenSecret, `/video/v1/assets/${encodeURIComponent(assetId)}`, {
+    method: 'DELETE',
+  })
+
+  if (res.status === 204 || res.status === 200) {
+    return jsonResponse({ ok: true, deleted: true })
+  }
+  if (res.status === 404) {
+    return jsonResponse({ ok: true, deleted: true, note: 'already_deleted' })
+  }
+
+  const rawText = await res.text()
+  let parsed: Record<string, unknown> = {}
+  if (rawText) {
+    try {
+      const p = JSON.parse(rawText) as unknown
+      if (p && typeof p === 'object' && !Array.isArray(p)) parsed = p as Record<string, unknown>
+    } catch {
+      /* ignore */
+    }
+  }
+  const err = formatMuxApiErrorMessage(parsed, res.status)
+  console.warn('[mux] delete_mux_asset Mux HTTP', res.status, err)
+  return jsonResponse({ ok: false, error: err }, 502)
+}
+
 /** Keep prompt size bounded for latency and cost; transcript is best-effort coverage. */
 const SUMMARIZE_TRANSCRIPT_MAX_CHARS = 95_000
-const DEFAULT_ALLOWED_TOPICS = [
+/** Keep synchronized with `app/src/types.ts` and `app/src/pages/admin/courseWorkflow.ts`. */
+const COURSE_TOPIC_VALUES = [
   'Ethics',
   'Tax',
   'Audit',
@@ -285,13 +520,23 @@ const DEFAULT_ALLOWED_TOPICS = [
   'Technology',
   'Leadership',
   'Advisory',
-]
+] as const
+const DEFAULT_ALLOWED_TOPICS = [...COURSE_TOPIC_VALUES]
 const MIN_GENERATED_QUESTIONS = 20
 const MAX_GENERATED_QUESTIONS = 60
 
 function clampGeneratedQuestions(value: number): number {
   if (!Number.isFinite(value)) return MIN_GENERATED_QUESTIONS
   return Math.min(MAX_GENERATED_QUESTIONS, Math.max(MIN_GENERATED_QUESTIONS, Math.round(value)))
+}
+
+function normalizeAllowedTopics(raw: unknown): string[] {
+  if (!Array.isArray(raw) || raw.length === 0) return DEFAULT_ALLOWED_TOPICS
+  const allowed = new Set<string>(COURSE_TOPIC_VALUES)
+  const normalized = raw
+    .map((topic) => (typeof topic === 'string' ? topic.trim() : ''))
+    .filter((topic) => topic.length > 0 && allowed.has(topic))
+  return normalized.length > 0 ? [...new Set(normalized)] : DEFAULT_ALLOWED_TOPICS
 }
 
 type DraftQuestion = {
@@ -313,8 +558,13 @@ function parseDraftQuestions(raw: unknown): DraftQuestion[] {
       const options = optionsRaw
         .map((option) => (typeof option === 'string' ? option.trim() : ''))
         .filter((option) => option.length > 0)
-      const correctOption =
-        typeof typed.correct_option === 'string' ? typed.correct_option.trim().toLowerCase() : ''
+      const rawCorrectOption =
+        typeof typed.correct_option === 'string'
+          ? typed.correct_option
+          : typeof typed.correctOption === 'string'
+            ? typed.correctOption
+            : ''
+      const correctOption = rawCorrectOption.trim().toLowerCase()
       const explanation = typeof typed.explanation === 'string' ? typed.explanation.trim() : ''
       const difficulty = typeof typed.difficulty === 'string' ? typed.difficulty.trim().toLowerCase() : ''
       if (!prompt || options.length !== 4 || !['a', 'b', 'c', 'd'].includes(correctOption)) return null
@@ -396,13 +646,7 @@ function parseDraftRequestContext(
       : null
   const courseMinutes =
     typeof body.course_minutes === 'number' && Number.isFinite(body.course_minutes) ? body.course_minutes : null
-  const allowedTopicsCandidate =
-    Array.isArray(body.allowed_topics) && body.allowed_topics.length > 0
-      ? body.allowed_topics
-          .map((topic) => (typeof topic === 'string' ? topic.trim() : ''))
-          .filter((topic) => topic.length > 0)
-      : []
-  const allowedTopics = allowedTopicsCandidate.length > 0 ? allowedTopicsCandidate : DEFAULT_ALLOWED_TOPICS
+  const allowedTopics = normalizeAllowedTopics(body.allowed_topics)
 
   return {
     ok: true,
@@ -848,6 +1092,7 @@ type TranscriptPayload = {
   downloadVersion: number
 }
 
+/** Keep synchronized with `COURSE_TRANSCRIPT_DOWNLOAD_VERSION` in `app/src/lib/transcript.ts`. */
 const TRANSCRIPT_DOWNLOAD_VERSION = 1
 
 function normalizeTranscriptText(value: string): string {
@@ -868,8 +1113,8 @@ function normalizeTranscriptSegments(rawSegments: unknown): TranscriptCuePayload
       const typed = entry as Record<string, unknown>
       const text = typeof typed.text === 'string' ? typed.text.trim() : ''
       if (!text) return null
-      const startSeconds = toFiniteSeconds(typed.start)
-      const endSeconds = toFiniteSeconds(typed.end)
+      const startSeconds = toFiniteSeconds(typed.startSeconds ?? typed.start)
+      const endSeconds = toFiniteSeconds(typed.endSeconds ?? typed.end)
       return {
         ...(startSeconds != null ? { startSeconds } : {}),
         ...(endSeconds != null ? { endSeconds } : {}),
@@ -900,6 +1145,19 @@ function buildTranscriptPayload(text: string, rawSegments: unknown): TranscriptP
   }
 }
 
+/**
+ * Whisper-class models return segment timestamps with `verbose_json`. Newer `gpt-4o-*-transcribe*`
+ * models reject `verbose_json` and require `json` or `text` (OpenAI error:
+ * "response_format 'verbose_json' is not compatible with model ...").
+ */
+function openAiTranscriptionResponseFormat(model: string): 'verbose_json' | 'json' {
+  const m = model.toLowerCase().trim()
+  if (m === 'whisper-1' || m.startsWith('whisper-')) {
+    return 'verbose_json'
+  }
+  return 'json'
+}
+
 async function openAiTranscribe(
   apiKey: string,
   file: File,
@@ -908,7 +1166,7 @@ async function openAiTranscribe(
 ): Promise<OpenAiTranscribeResult> {
   const payload = new FormData()
   payload.append('model', model)
-  payload.append('response_format', 'verbose_json')
+  payload.append('response_format', openAiTranscriptionResponseFormat(model))
   payload.append('file', file, file.name || 'upload.mp4')
   if (language) payload.append('language', language)
 
@@ -975,14 +1233,45 @@ function shouldRetryTranscriptionWithFallback(
   return (
     normalized.includes('too large for this model') ||
     normalized.includes('tokens in instructions + audio') ||
-    normalized.includes('maximum context length')
+    normalized.includes('maximum context length') ||
+    (normalized.includes('verbose_json') && normalized.includes('not compatible'))
   )
 }
 
 type MuxEnvelope<T> = {
   data?: T
-  errors?: Array<{ message?: string }>
-  error?: string
+  errors?: Array<{ message?: string; messages?: string[] }>
+  error?: string | Record<string, unknown>
+}
+
+/** Mux often returns `error: { type, messages: [...] }` or `errors: [{ messages }]`, not a string. */
+function formatMuxApiErrorMessage(body: Record<string, unknown>, httpStatus: number): string {
+  const errors = body.errors
+  if (Array.isArray(errors) && errors.length > 0) {
+    const first = errors[0]
+    if (first && typeof first === 'object' && !Array.isArray(first)) {
+      const o = first as Record<string, unknown>
+      if (typeof o.message === 'string' && o.message.trim()) return o.message.trim()
+      const msgs = o.messages
+      if (Array.isArray(msgs)) {
+        const text = msgs.filter((m): m is string => typeof m === 'string' && m.trim().length > 0).join(' ')
+        if (text.trim()) return text.trim()
+      }
+    }
+  }
+  const err = body.error
+  if (typeof err === 'string' && err.trim()) return err.trim()
+  if (err && typeof err === 'object' && !Array.isArray(err)) {
+    const o = err as Record<string, unknown>
+    if (typeof o.message === 'string' && o.message.trim()) return o.message.trim()
+    const msgs = o.messages
+    if (Array.isArray(msgs)) {
+      const text = msgs.filter((m): m is string => typeof m === 'string' && m.trim().length > 0).join(' ')
+      if (text.trim()) return text.trim()
+    }
+    if (typeof o.type === 'string' && o.type.trim()) return o.type.trim()
+  }
+  return `Video provider error (${httpStatus})`
 }
 
 function muxAuthHeader(tokenId: string, tokenSecret: string): string {

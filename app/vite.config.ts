@@ -1,42 +1,8 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
-/**
- * Cloudflare Pages injects `VITE_*` on `process.env` during `npm run build`.
- * In some setups those values do not get inlined into `import.meta.env` the same way as `.env` files.
- * Explicit `define` ensures CI/Pages builds match local `.env` behavior.
- */
-function importMetaEnvDefineFromProcess(): Record<string, string> {
-  const d: Record<string, string> = {}
-  for (const key of Object.keys(process.env)) {
-    if (!key.startsWith('VITE_')) {
-      continue
-    }
-    const val = process.env[key]
-    if (val === undefined) {
-      continue
-    }
-    d[`import.meta.env.${key}`] = JSON.stringify(val)
-  }
-  // Some hosts only set SUPABASE_URL (no VITE_ prefix) for the Pages build; map the API URL only.
-  if (!d['import.meta.env.VITE_SUPABASE_URL']) {
-    const raw = process.env.SUPABASE_URL?.trim()
-    if (raw && /^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(raw)) {
-      d['import.meta.env.VITE_SUPABASE_URL'] = JSON.stringify(raw.replace(/\/$/, ''))
-    }
-  }
-  if (!d['import.meta.env.VITE_SUPABASE_ANON_KEY']) {
-    const anon = process.env.SUPABASE_ANON_KEY?.trim()
-    if (anon) {
-      d['import.meta.env.VITE_SUPABASE_ANON_KEY'] = JSON.stringify(anon)
-    }
-  }
-  return d
-}
-
 // https://vite.dev/config/
 export default defineConfig({
-  define: importMetaEnvDefineFromProcess(),
   plugins: [react()],
   build: {
     // The learner player route bundles Mux's web component runtime (~1MB minified)

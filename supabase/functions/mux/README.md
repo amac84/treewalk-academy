@@ -13,13 +13,15 @@ Proxies [Mux Video](https://docs.mux.com/) direct uploads and status reads so `M
 | `OPENAI_COURSE_METADATA_MODEL` | Optional metadata model override (default `gpt-4o-mini`) |
 | `OPENAI_COURSE_QUIZ_MODEL` | Optional quiz model override (default `gpt-4o`) |
 
+**`delete_mux_asset` (draft delete / free Mux quota):** also set `CLERK_SECRET_KEY` (same as Clerk Dashboard API keys) so the function can verify `X-Clerk-Session-Token`. Use `SUPABASE_SERVICE_ROLE_KEY` (auto on hosted Supabase) so **instructors** can be checked against `academy_courses`. Set **`ACADEMY_SUPER_ADMIN_EMAILS`** to a comma-separated list of lowercase emails if you grant super admin in the SPA via `superAdminEmails` in `app-settings.json` only — the Edge Function does not read that file; without this secret those users look like `learner` here.
+
 Optional for local mock UI only (never enable in production):
 
 | Name | Purpose |
 |------|---------|
 | `MUX_ALLOW_UNAUTHENTICATED` | Set to `true` to skip Supabase JWT checks while the app has no Auth wiring |
 
-**Recommended (local + live DB):** keep this `false` and enable **Anonymous** under Supabase → Authentication → Providers. The Vite app calls `signInAnonymously()` in dev (and when `VITE_SUPABASE_MUX_ANON_FALLBACK=true`) so demo-role users still send a valid user JWT to this function.
+**Recommended (local + live DB):** keep this `false` and enable **Anonymous** under Supabase → Authentication → Providers. The Vite app calls `signInAnonymously()` in dev (and when `supabaseMuxAnonFallback=true` in `app/public/app-settings.json`) so demo-role users still send a valid user JWT to this function.
 
 ## Deploy
 
@@ -52,10 +54,10 @@ These drafting actions do **not** require Mux tokens (only `OPENAI_API_KEY` and 
 
 Model selection guidance:
 
-- Send `model` from the client request (for example `VITE_OPENAI_TRANSCRIBE_MODEL` in the SPA).
+- Send `model` from the client request (for example `openAiTranscribeModel` in `app/public/app-settings.json`).
 - If no model is supplied, the function defaults to `gpt-4o-mini-transcribe`.
 - If OpenAI returns a context/token-too-large error for the selected model, the function retries once with `OPENAI_TRANSCRIBE_FALLBACK_MODEL` (defaults to `whisper-1`).
 - Metadata drafting uses `OPENAI_COURSE_METADATA_MODEL` if set (otherwise `gpt-4o-mini`).
 - Quiz generation uses `OPENAI_COURSE_QUIZ_MODEL` if set (otherwise `gpt-4o`).
 
-The Vite app should set `VITE_MUX_FUNCTION_URL` to `https://<project-ref>.supabase.co/functions/v1/mux`.
+The Vite app should set `muxFunctionUrl` in `app/public/app-settings.json` to `https://<project-ref>.supabase.co/functions/v1/mux`.

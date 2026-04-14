@@ -2,21 +2,22 @@ import { useMemo } from 'react'
 import { COURSE_STATUS_LABELS } from '../../constants'
 import { useAppStore } from '../../hooks/useAppStore'
 import { getCourseCPDHours } from '../../lib/cpd'
-import type { Course, CourseLevel, CourseStatus, CourseTopic, UserRole } from '../../types'
+import {
+  COURSE_TOPIC_VALUES,
+  type Course,
+  type CourseAudience,
+  type CourseLevel,
+  type CourseStatus,
+  type CourseTopic,
+  type UserRole,
+} from '../../types'
 
 export const ORDERED_STATUSES: CourseStatus[] = ['draft', 'review', 'published']
 
-export const COURSE_TOPICS: CourseTopic[] = [
-  'Ethics',
-  'Tax',
-  'Audit',
-  'Financial Reporting',
-  'Technology',
-  'Leadership',
-  'Advisory',
-]
+export const COURSE_TOPICS: CourseTopic[] = [...COURSE_TOPIC_VALUES]
 
 export const COURSE_LEVELS: CourseLevel[] = ['beginner', 'intermediate', 'advanced']
+export const COURSE_AUDIENCES: CourseAudience[] = ['everyone', 'internal']
 export const AUTHOR_ROLES: UserRole[] = ['instructor', 'content_admin', 'super_admin']
 
 export type CourseDetailsDraft = {
@@ -26,6 +27,7 @@ export type CourseDetailsDraft = {
   category: string
   topic: CourseTopic
   level: CourseLevel
+  audience: CourseAudience
   instructorId: string
 }
 
@@ -37,6 +39,7 @@ export function courseDetailsDraftFromCourse(course: {
   category: string
   topic: CourseTopic
   level: CourseLevel
+  audience: CourseAudience
   instructorId: string
 }): CourseDetailsDraft {
   return {
@@ -46,6 +49,7 @@ export function courseDetailsDraftFromCourse(course: {
     category: course.category,
     topic: course.topic,
     level: course.level,
+    audience: course.audience,
     instructorId: course.instructorId,
   }
 }
@@ -64,7 +68,14 @@ export function courseDetailsDraftDirty(
   draft: CourseDetailsDraft,
   course: Pick<
     Course,
-    'title' | 'summary' | 'description' | 'category' | 'topic' | 'level' | 'instructorId'
+    | 'title'
+    | 'summary'
+    | 'description'
+    | 'category'
+    | 'topic'
+    | 'level'
+    | 'audience'
+    | 'instructorId'
   >,
   canAssignInstructor: boolean,
 ): boolean {
@@ -74,6 +85,7 @@ export function courseDetailsDraftDirty(
   if (draft.category.trim() !== course.category.trim()) return true
   if (draft.topic !== course.topic) return true
   if (draft.level !== course.level) return true
+  if (draft.audience !== course.audience) return true
   if (canAssignInstructor && draft.instructorId !== course.instructorId) return true
   return false
 }

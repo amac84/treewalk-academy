@@ -2,6 +2,8 @@ import MuxPlayer from '@mux/mux-player-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useAppStore } from '../../hooks/useAppStore'
+import { getAppSettings } from '../../lib/appSettings'
+import { learnerCanAccessCourse } from '../../lib/courseAccess'
 import { getWatchedPercentFromEnrollment } from '../../lib/courseLogic'
 import {
   buildCourseTranscriptDownload,
@@ -18,7 +20,7 @@ type MuxPlayerElement = HTMLElement & {
 
 export function CoursePlayerPage() {
   const { courseId = '' } = useParams()
-  const { courses, currentUserId, getActiveEnrollment, recordVideoPlayback } = useAppStore()
+  const { courses, currentUserId, currentUser, getActiveEnrollment, recordVideoPlayback } = useAppStore()
   const [transcriptExpanded, setTranscriptExpanded] = useState(false)
   const [copyFeedback, setCopyFeedback] = useState<'idle' | 'copied' | 'error'>('idle')
   const playerRef = useRef<MuxPlayerElement | null>(null)
@@ -28,12 +30,22 @@ export function CoursePlayerPage() {
   const course = courses.find((item) => item.id === courseId)
   const enrollment = getActiveEnrollment(currentUserId, courseId)
 
-  if (!course || !enrollment) {
+  const blocked =
+    course &&
+    enrollment &&
+    currentUser?.role === 'learner' &&
+    !learnerCanAccessCourse(currentUser, course)
+
+  if (!course || !enrollment || blocked) {
     return (
       <section className="player-unavailable">
         <p className="section-eyebrow">Playback unavailable</p>
         <h1>Course unavailable</h1>
-        <p className="page-subtitle">The course could not be found or you are not enrolled.</p>
+        <p className="page-subtitle">
+          {blocked
+            ? 'This lesson is for Treewalk team members only.'
+            : 'The course could not be found or you are not enrolled.'}
+        </p>
         <Link to="/courses" className="text-link">
           Back to courses
         </Link>
@@ -54,19 +66,22 @@ export function CoursePlayerPage() {
   const courseTranscriptPlainText = buildCourseTranscriptPlainText(course)
   const canExportCourseTranscript = courseTranscriptPlainText.trim().length > 0
   const activeProgress = enrollment.videoProgress
-  const demoPlaybackId = import.meta.env.VITE_MUX_PLAYBACK_ID?.trim() || ''
+  const demoPlaybackId = getAppSettings().muxPlaybackId
   const playbackId = course.muxPlaybackId || demoPlaybackId || undefined
-  const muxEnvKey = import.meta.env.VITE_MUX_ENV_KEY?.trim()
+  const muxEnvKey = getAppSettings().muxEnvironmentKey
   const quizUnlocked = watchedPercent >= 100
   const allowedSeekSecond = Math.max(
     0,
     (activeProgress?.completed ? activeProgress.durationSeconds : activeProgress?.furthestSecond) ?? 0,
   )
 
+  // Sync tick baseline when entering this course only. Do not depend on
+  // lastPositionSecond from heartbeats — that would clear isPlayingRef while
+  // the video is still playing and stop verified-time accumulation.
   useEffect(() => {
     lastTickRef.current = activeProgress?.lastPositionSecond ?? 0
     isPlayingRef.current = false
-  }, [activeProgress?.lastPositionSecond])
+  }, [course.id])
 
   useEffect(() => {
     setTranscriptExpanded(false)
@@ -81,12 +96,15 @@ export function CoursePlayerPage() {
     }
   }, [])
 
+  // Resume saved position once per course mount, not on every progress update
+  // (otherwise each heartbeat could snap the playhead backward).
   useEffect(() => {
     const player = playerRef.current
-    if (!player || !activeProgress?.lastPositionSecond) return
-    if (Math.abs(Number(player.currentTime ?? 0) - activeProgress.lastPositionSecond) < 3) return
-    player.currentTime = activeProgress.lastPositionSecond
-  }, [activeProgress?.lastPositionSecond, course.id])
+    const resumeAt = activeProgress?.lastPositionSecond
+    if (!player || resumeAt == null || resumeAt <= 0) return
+    if (Math.abs(Number(player.currentTime ?? 0) - resumeAt) < 3) return
+    player.currentTime = resumeAt
+  }, [course.id])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -298,7 +316,7 @@ export function CoursePlayerPage() {
                   {import.meta.env.DEV ? (
                     <>
                       {' '}
-                      For local demos, set <code>VITE_MUX_PLAYBACK_ID</code> in <code>app/.env</code>.
+                      For local demos, set <code>muxPlaybackId</code> in <code>app/public/app-settings.json</code>.
                     </>
                   ) : null}
                 </p>

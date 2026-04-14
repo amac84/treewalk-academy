@@ -1,12 +1,14 @@
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { CompletionBadge } from '../../components/common/CourseCard'
-import { REQUIRED_PASSING_SCORE } from '../../constants'
+import { COURSE_AUDIENCE_LABELS, REQUIRED_PASSING_SCORE } from '../../constants'
 import { useAppStore } from '../../hooks/useAppStore'
+import { learnerCanAccessCourse } from '../../lib/courseAccess'
 import { getCourseCPDHours } from '../../lib/cpd'
 import { getWatchedPercentFromEnrollment } from '../../lib/courseLogic'
 
 export function CourseDetailPage() {
   const { courseId = '' } = useParams()
+  const navigate = useNavigate()
   const { courses, currentUser, enrollInCourse, getCourseReadiness, getActiveEnrollment } = useAppStore()
   const course = courses.find((item) => item.id === courseId)
 
@@ -15,6 +17,25 @@ export function CourseDetailPage() {
       <section className="panel empty-state">
         <h1>Course not found</h1>
         <p>The requested course could not be loaded.</p>
+      </section>
+    )
+  }
+
+  if (
+    course.status === 'published' &&
+    currentUser.role === 'learner' &&
+    !learnerCanAccessCourse(currentUser, course)
+  ) {
+    return (
+      <section className="panel empty-state">
+        <h1>Internal catalog</h1>
+        <p>
+          This course is limited to Treewalk team members. Sign in with your Treewalk email or browse courses open to
+          everyone.
+        </p>
+        <Link className="text-link" to="/courses">
+          Back to courses
+        </Link>
       </section>
     )
   }
@@ -33,6 +54,7 @@ export function CourseDetailPage() {
           <div className="detail-meta">
             <span>{course.category}</span>
             <span>{course.level}</span>
+            <span>{COURSE_AUDIENCE_LABELS[course.audience]}</span>
             <span>{course.videoMinutes} min</span>
             <span>{getCourseCPDHours(course).toFixed(2)} CPD</span>
           </div>
@@ -43,7 +65,15 @@ export function CourseDetailPage() {
             <p className="section-eyebrow">Start</p>
             <h2>Ready to begin</h2>
             <p>Enroll to unlock the player, quiz, and completion record.</p>
-            <button onClick={() => enrollInCourse(course.id)}>Enroll now</button>
+            <button
+              type="button"
+              onClick={() => {
+                const result = enrollInCourse(course.id)
+                if (result.ok) navigate(`/courses/${course.id}/player`)
+              }}
+            >
+              Enroll now
+            </button>
           </aside>
         ) : (
           <aside className="detail-status">

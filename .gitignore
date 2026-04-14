@@ -8,6 +8,13 @@ dist/
 .env.local
 .env.*.local
 
+# Local runtime config (use app/public/app-settings.example.json + Cloudflare `VITE_*` overrides)
+app/public/app-settings.json
+
+# Test coverage output
+coverage/
+app/coverage/
+
 # Keys and tokens
 *.pem
 .id_rsa

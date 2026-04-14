@@ -66,6 +66,9 @@ const WebinarsUpcomingPage = lazy(
   async () => ({ default: (await import('./pages/learner/WebinarsUpcomingPage')).WebinarsUpcomingPage }),
 )
 const WebinarsPage = lazy(async () => ({ default: (await import('./pages/learner/WebinarsPage')).WebinarsPage }))
+const SignInPage = lazy(async () => ({ default: (await import('./pages/SignInPage')).SignInPage }))
+const SignUpPage = lazy(async () => ({ default: (await import('./pages/SignUpPage')).SignUpPage }))
+const SsoCallbackPage = lazy(async () => ({ default: (await import('./pages/SsoCallbackPage')).SsoCallbackPage }))
 
 export function AppRouter() {
   return (
@@ -79,6 +82,10 @@ export function AppRouter() {
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/demo/access" element={<DemoAccessPage />} />
+        <Route path="/sign-in/sso-callback" element={<SsoCallbackPage />} />
+        <Route path="/sign-up/sso-callback" element={<SsoCallbackPage />} />
+        <Route path="/sign-in/*" element={<SignInPage />} />
+        <Route path="/sign-up/*" element={<SignUpPage />} />
 
         <Route
           element={

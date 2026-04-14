@@ -2,6 +2,7 @@ import { createContext } from 'react'
 import type {
   AppState,
   Course,
+  CourseAudience,
   CourseLevel,
   CoursesSyncStatus,
   CourseStatus,
@@ -55,6 +56,7 @@ export interface CreateCourseInput {
   category: string
   topic: CourseTopic
   level: CourseLevel
+  audience?: CourseAudience
   instructorId?: string
   videoMinutes?: number
   quiz?: QuizQuestion[]
@@ -67,6 +69,7 @@ export interface UpdateCourseInput {
   category: string
   topic: CourseTopic
   level: CourseLevel
+  audience: CourseAudience
   instructorId?: string
 }
 
@@ -76,6 +79,8 @@ export interface AppStoreContextValue extends AppState {
   currentUser: User | null
   currentUserRole: UserRole | null
   setCurrentUser: (userId: string) => void
+  /** Replaces or clears the signed-in user (Clerk → academy profile). Passing null signs out locally. */
+  syncAuthUser: (user: User | null) => void
   issueInvite: (email: string, role: UserRole) => Invite
   inviteUser: (email: string, fullName: string, role: UserRole) => Invite
   acceptInvite: (code: string) => { ok: true; user: User } | { ok: false; error: string }
@@ -96,7 +101,10 @@ export interface AppStoreContextValue extends AppState {
   deleteCourseQuizQuestion: (courseId: string, questionId: string) => ActionResult
   createCourse: (input: CreateCourseInput) => { ok: true; course: Course } | { ok: false; message: string }
   updateCourseDetails: (courseId: string, input: UpdateCourseInput) => ActionResult
-  deleteDraftCourse: (courseId: string) => Promise<ActionResult>
+  deleteDraftCourse: (
+    courseId: string,
+    options?: { clerkSessionToken?: string | null },
+  ) => Promise<ActionResult>
   transitionCourseStatus: (courseId: string, nextStatus: CourseStatus) => ActionResult
   updateCourseVideo: (
     courseId: string,

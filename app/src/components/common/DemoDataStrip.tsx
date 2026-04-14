@@ -15,7 +15,7 @@ export function DemoDataStrip({ bleed }: DemoDataStripProps) {
 
   const devHint =
     import.meta.env.DEV &&
-    ' Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in app/.env, run the academy_courses migration, redeploy, and restart the dev server.'
+    ' Add supabaseUrl and supabaseAnonKey in app/public/app-settings.json, run the academy_courses migration, redeploy, and restart the dev server.'
 
   const inner = (
     <div className="sync-banner sync-banner--muted sync-banner--demo-local" role="status">

@@ -7,6 +7,7 @@ Invite-oriented LMS frontend for CPD-style learning: course playback, admin tool
 ```bash
 cd app
 cp .env.example .env
+# Review public/app-settings.json (see public/app-settings.example.json for placeholders/reference)
 # Fill in local values; never commit .env
 npm install
 npm run dev
@@ -14,8 +15,8 @@ npm run dev
 
 ## Environment variables
 
-- **Committed template:** [`app/.env.example`](app/.env.example) lists every variable with placeholders.
-- **Client-safe (Vite `VITE_*`):** Supabase URL + anon key, Mux environment IDs, public function URLs. The Supabase anon key is designed to ship in the browser; access is enforced with Row Level Security.
+- **Committed templates:** [`app/.env.example`](app/.env.example) covers server/tooling values and [`app/public/app-settings.example.json`](app/public/app-settings.example.json) covers browser-safe runtime settings.
+- **Client-safe runtime config:** Supabase URL + anon key, Mux environment IDs, public function URLs, and similar browser-safe values now load from `app/public/app-settings.json`. The Supabase anon key is designed to ship in the browser; access is enforced with Row Level Security.
 - **Private:** Database password, Mux API tokens, signing keys, Linear API key, Cloudflare deploy tokens, and any service role keys belong only in local `.env` (untracked), CI secrets, or Supabase Edge Function secrets — not in the repo.
 
 ## Repo layout
@@ -27,6 +28,7 @@ npm run dev
 | `treewalk_academy_design.md` | Product and design context |
 | `IMPLEMENTATION_REPORT.md` | Build notes and checklist |
 | `DESIGN.md` | Pointer to design docs |
+| [`SCORM_EXPORT_FUTURE_WORK.md`](SCORM_EXPORT_FUTURE_WORK.md) | Roadmap for SCORM packaging and export (future work) |
 
 ## Deploy
 

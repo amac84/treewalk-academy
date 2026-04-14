@@ -1,0 +1,20 @@
+{
+  "clerkPublishableKey": "",
+  "nextPublicClerkPublishableKey": "pk_test_...",
+  "treewalkInternalEmailDomains": [
+    "treewalk.com",
+    "treewalkventures.com",
+    "treewalk.test"
+  ],
+  "superAdminEmails": [],
+  "cpdProviderName": "Treewalk Consulting Inc.",
+  "feedbackFunctionUrl": "https://your-project-ref.supabase.co/functions/v1/create-linear-ticket",
+  "muxFunctionUrl": "https://your-project-ref.supabase.co/functions/v1/mux",
+  "muxEnvironmentId": "your-mux-environment-id",
+  "muxEnvironmentKey": "your-mux-environment-key",
+  "muxPlaybackId": "",
+  "supabaseUrl": "https://your-project-ref.supabase.co",
+  "supabaseAnonKey": "your-supabase-anon-key",
+  "openAiTranscribeModel": "",
+  "supabaseMuxAnonFallback": true
+}

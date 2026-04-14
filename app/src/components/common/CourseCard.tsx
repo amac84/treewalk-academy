@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
-import type { Course } from '../../types'
+import { COURSE_AUDIENCE_LABELS } from '../../constants'
 import { getCourseCPDHours } from '../../lib/cpd'
+import type { Course } from '../../types'
 
 type CourseCardProps = {
   course: Course
@@ -13,7 +14,10 @@ export function CourseCard({ course }: CourseCardProps) {
     <article className="course-card">
       <div className="course-card__header">
         <p className="eyebrow">{course.category}</p>
-        <span className="course-card__level">{course.level}</span>
+        <div className="course-card__header-tags">
+          <span className="course-card__level">{course.level}</span>
+          <span className="course-card__audience">{COURSE_AUDIENCE_LABELS[course.audience]}</span>
+        </div>
       </div>
       <h3>{course.title}</h3>
       <p className="course-card__summary">{course.summary}</p>
