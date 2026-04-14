@@ -11,6 +11,7 @@ import {
 import { getCourseCPDHours } from '../lib/cpd'
 import { buildQuizPolicy, ensureQuizPolicy } from '../lib/quizPolicy'
 import { learnerCanAccessCourse } from '../lib/courseAccess'
+import { migrateLearnerRuntimeForClerkLogin, normalizeLearnerProfiles } from '../lib/clerkRuntimeMigration'
 import { getClerkPublishableKey } from '../lib/clerkEnv'
 import { deleteMuxAsset, isMuxFunctionConfigured } from '../lib/muxEdge'
 import { getSupabaseBrowserClient, hasSupabaseBrowserEnv } from '../lib/supabaseClient'
@@ -69,6 +70,7 @@ const toRuntimeState = (state: AppState) => ({
   cpdLedger: state.cpdLedger,
   transcript: state.transcript,
   learningActivityLog: state.learningActivityLog,
+  learnerProfiles: state.learnerProfiles,
   removedCatalogCourseIds: state.removedCatalogCourseIds,
 })
 
@@ -261,6 +263,7 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
           cpdLedger: runtime?.cpdLedger ?? s.cpdLedger,
           transcript: runtime?.transcript ?? s.transcript,
           learningActivityLog: runtime?.learningActivityLog ?? s.learningActivityLog,
+          learnerProfiles: normalizeLearnerProfiles(runtime?.learnerProfiles ?? s.learnerProfiles),
         }))
         setCoursesSyncStatus('synced')
         setCoursesSyncMessage(null)
@@ -306,12 +309,20 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       setCurrentUserId('')
       return
     }
-    setState((prev) => ({
-      ...prev,
-      users: prev.users.some((u) => u.id === user.id)
-        ? prev.users.map((u) => (u.id === user.id ? user : u))
-        : [...prev.users, user],
-    }))
+    const profileStub = { userId: user.id, email: user.email.trim() }
+    setState((prev) => {
+      const nextProfiles = prev.learnerProfiles.some((p) => p.userId === user.id)
+        ? prev.learnerProfiles.map((p) => (p.userId === user.id ? profileStub : p))
+        : [...prev.learnerProfiles, profileStub]
+      const withUser: AppState = {
+        ...prev,
+        users: prev.users.some((u) => u.id === user.id)
+          ? prev.users.map((u) => (u.id === user.id ? user : u))
+          : [...prev.users, user],
+        learnerProfiles: nextProfiles,
+      }
+      return migrateLearnerRuntimeForClerkLogin(withUser, user)
+    })
     setCurrentUserId(user.id)
   }, [])
 
@@ -319,6 +330,14 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
     if (!getSupabaseBrowserClient()) return
     void syncSupabaseSessionForAuthorRole(currentUserRole)
   }, [currentUserRole])
+
+  /** Supabase may load shared runtime after Clerk; remap legacy ids once catalog + Clerk user are both ready. */
+  useEffect(() => {
+    if (coursesSyncStatus !== 'synced') return
+    if (!getClerkPublishableKey()) return
+    if (!currentUser?.email?.trim()) return
+    setState((prev) => migrateLearnerRuntimeForClerkLogin(prev, currentUser))
+  }, [coursesSyncStatus, currentUser?.id, currentUser?.email])
 
   const getActiveEnrollment = useCallback(
     (userId: string, courseId: string): Enrollment | null =>
@@ -501,6 +520,11 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
         result = { ok: true, user }
         setCurrentUserId(user.id)
 
+        const profileStub = { userId: user.id, email: user.email.trim() }
+        const nextLearnerProfiles = prev.learnerProfiles.some((p) => p.userId === user.id)
+          ? prev.learnerProfiles.map((p) => (p.userId === user.id ? profileStub : p))
+          : [...prev.learnerProfiles, profileStub]
+
         return {
           ...prev,
           invites: prev.invites.map((entry) =>
@@ -509,6 +533,7 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
           users: existing
             ? prev.users.map((u) => (u.id === existing.id ? user : u))
             : [...prev.users, user],
+          learnerProfiles: nextLearnerProfiles,
         }
       })
 

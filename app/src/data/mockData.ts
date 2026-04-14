@@ -147,6 +147,7 @@ export const mockInitialState: AppState = {
   invites: mockInvites,
   courses: mockCourses,
   removedCatalogCourseIds: [],
+  learnerProfiles: [],
   enrollments: mockEnrollments,
   progress: {},
   completions: [],
