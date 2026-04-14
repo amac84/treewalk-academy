@@ -97,6 +97,7 @@ export type PersistedRuntimeState = Pick<
   | 'cpdLedger'
   | 'transcript'
   | 'learningActivityLog'
+  | 'learnerProfiles'
 > & { removedCatalogCourseIds?: string[] }
 
 export async function persistCourseToSupabase(course: Course): Promise<{ ok: true } | { ok: false; message: string }> {

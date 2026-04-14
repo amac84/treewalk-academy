@@ -319,6 +319,12 @@ export interface LearningActivityEvent {
   watchedSeconds: number
 }
 
+/** Persisted with learner runtime so invite / pre-Clerk ids can be remapped after Clerk sign-in. */
+export interface LearnerProfileStub {
+  userId: string
+  email: string
+}
+
 export interface AppState {
   users: User[]
   invites: Invite[]
@@ -328,6 +334,8 @@ export interface AppState {
    * Prevents seed/mock courses from reappearing after a successful DB delete.
    */
   removedCatalogCourseIds: string[]
+  /** Maps academy user ids to email for Clerk migration (not all users stay in `users` after reload). */
+  learnerProfiles: LearnerProfileStub[]
   enrollments: Enrollment[]
   progress: Record<string, Progress>
   completions: Completion[]
