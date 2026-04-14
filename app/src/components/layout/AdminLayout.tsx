@@ -7,9 +7,14 @@ import type { UserRole } from '../../types'
 const courseRoles: UserRole[] = ['instructor', 'content_admin', 'super_admin']
 const peopleRoles: UserRole[] = ['hr_admin', 'super_admin']
 
-const links: { label: string; to: string; roles?: UserRole[] }[] = [
-  { label: 'Overview', to: '/admin' },
+type AdminSideLink = { label: string; to: string; roles?: UserRole[]; end?: boolean }
+
+const contentLinksDef: AdminSideLink[] = [
   { label: 'Courses', to: '/admin/courses', roles: courseRoles },
+]
+
+const adminLinksDef: AdminSideLink[] = [
+  { label: 'Overview', to: '/admin', end: true },
   { label: 'Invite Operations', to: '/admin/invites', roles: peopleRoles },
   { label: 'User Management', to: '/admin/users', roles: peopleRoles },
   { label: 'Report Snapshot', to: '/admin/reports/snapshot' },
@@ -17,9 +22,15 @@ const links: { label: string; to: string; roles?: UserRole[] }[] = [
   { label: 'Report Progress', to: '/admin/reports/progress' },
 ]
 
+function visibleAdminLinks(role: UserRole | undefined, items: AdminSideLink[]): AdminSideLink[] {
+  if (!role) return []
+  return items.filter((item) => !item.roles || item.roles.includes(role))
+}
+
 export function AdminLayout() {
   const user = useCurrentUser()
-  const visibleLinks = links.filter((link) => !link.roles || (user ? link.roles.includes(user.role) : false))
+  const contentLinks = visibleAdminLinks(user?.role, contentLinksDef)
+  const adminLinks = visibleAdminLinks(user?.role, adminLinksDef)
 
   return (
     <div className="app-shell app-shell--admin">
@@ -37,14 +48,26 @@ export function AdminLayout() {
           </div>
 
           <nav className="side-nav side-nav--admin">
-            <div className="side-nav__group">
-              <p className="side-nav__label">Operations</p>
-              {visibleLinks.map((link) => (
-                <NavLink key={link.to} to={link.to} end={link.to === '/admin'}>
-                  {link.label}
-                </NavLink>
-              ))}
-            </div>
+            {contentLinks.length > 0 ? (
+              <div className="side-nav__group">
+                <p className="side-nav__label">Content</p>
+                {contentLinks.map((link) => (
+                  <NavLink key={link.to} to={link.to} end={link.end}>
+                    {link.label}
+                  </NavLink>
+                ))}
+              </div>
+            ) : null}
+            {adminLinks.length > 0 ? (
+              <div className="side-nav__group">
+                <p className="side-nav__label">Admin</p>
+                {adminLinks.map((link) => (
+                  <NavLink key={link.to} to={link.to} end={link.end}>
+                    {link.label}
+                  </NavLink>
+                ))}
+              </div>
+            ) : null}
           </nav>
         </div>
 

@@ -481,6 +481,18 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
     [issueInvite],
   )
 
+  const deletePendingInvite = useCallback(
+    (inviteId: string) => {
+      if (currentUserRole !== 'hr_admin' && currentUserRole !== 'super_admin') return
+      setState((prev) => {
+        const target = prev.invites.find((i) => i.id === inviteId)
+        if (!target || target.status !== 'pending') return prev
+        return { ...prev, invites: prev.invites.filter((i) => i.id !== inviteId) }
+      })
+    },
+    [currentUserRole],
+  )
+
   const acceptInvite = useCallback(
     (code: string): { ok: true; user: User } | { ok: false; error: string } => {
       const normalized = code.trim().toUpperCase()
@@ -553,6 +565,49 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       }))
     },
     [currentUserRole],
+  )
+
+  const deleteUser = useCallback(
+    (userId: string) => {
+      if (currentUserRole !== 'hr_admin' && currentUserRole !== 'super_admin') return
+      if (userId === currentUserId) return
+
+      setState((prev) => {
+        const target = prev.users.find((u) => u.id === userId)
+        if (!target) return prev
+
+        const emailLower = target.email.toLowerCase()
+        const nextProgress = { ...prev.progress }
+        for (const key of Object.keys(nextProgress)) {
+          const entry = nextProgress[key]
+          if (!entry) continue
+          if (entry.userId === userId || key.startsWith(`${userId}::`)) {
+            delete nextProgress[key]
+          }
+        }
+
+        return {
+          ...prev,
+          users: prev.users.filter((u) => u.id !== userId),
+          learnerProfiles: prev.learnerProfiles.filter((p) => p.userId !== userId),
+          enrollments: prev.enrollments.filter((e) => e.userId !== userId),
+          progress: nextProgress,
+          completions: prev.completions.filter((c) => c.userId !== userId),
+          certificates: prev.certificates.filter((c) => c.userId !== userId),
+          cpdLedger: prev.cpdLedger.filter((c) => c.userId !== userId),
+          transcript: prev.transcript.filter((t) => t.userId !== userId),
+          learningActivityLog: prev.learningActivityLog.filter((a) => a.userId !== userId),
+          webinarAttendances: prev.webinarAttendances.filter((w) => w.userId !== userId),
+          webinars: prev.webinars.map((w) => ({
+            ...w,
+            attendeeIds: w.attendeeIds.filter((id) => id !== userId),
+          })),
+          invites: prev.invites.filter((inv) => inv.email.toLowerCase() !== emailLower),
+          auditEvents: prev.auditEvents.filter((e) => e.actorUserId !== userId),
+        }
+      })
+    },
+    [currentUserRole, currentUserId],
   )
 
   const enrollInCourse = useCallback(
@@ -1199,8 +1254,10 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       syncAuthUser,
       issueInvite,
       inviteUser,
+      deletePendingInvite,
       acceptInvite,
       suspendUser,
+      deleteUser,
       enrollInCourse,
       markVideoWatched,
       recordVideoPlayback,
@@ -1232,8 +1289,10 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       syncAuthUser,
       issueInvite,
       inviteUser,
+      deletePendingInvite,
       acceptInvite,
       suspendUser,
+      deleteUser,
       enrollInCourse,
       markVideoWatched,
       recordVideoPlayback,

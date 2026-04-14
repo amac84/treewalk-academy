@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { CatalogSyncCallout } from '../../components/common/CatalogSyncCallout'
 import { CourseCard } from '../../components/common/CourseCard'
 import { useAppStore } from '../../hooks/useAppStore'
 import { learnerCanAccessCourse } from '../../lib/courseAccess'
@@ -44,6 +45,7 @@ export function CoursesPage() {
 
   return (
     <section className="page-stack courses-page">
+      <CatalogSyncCallout variant="learner" />
       <header className="page-header page-header--split">
         <div>
           <p className="section-eyebrow">Course marketplace</p>

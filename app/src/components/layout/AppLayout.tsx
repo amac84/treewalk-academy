@@ -7,27 +7,39 @@ import type { UserRole } from '../../types'
 const courseRoles: UserRole[] = ['instructor', 'content_admin', 'super_admin']
 const peopleRoles: UserRole[] = ['hr_admin', 'super_admin']
 
-const learnerNav = [
-  { to: '/home', label: 'Home' },
-  { to: '/courses', label: 'Courses' },
-  { to: '/my-learning/transcript', label: 'Transcript' },
-  { to: '/my-learning/export', label: 'Export CPD' },
-  { to: '/webinars/upcoming', label: 'Upcoming Webinars' },
-  { to: '/webinars/history', label: 'Webinar History' },
+type SideNavItem = { to: string; label: string; roles?: UserRole[]; end?: boolean }
+
+const learnerNav: SideNavItem[] = [
+  { to: '/home', label: 'Home', end: true },
+  { to: '/courses', label: 'Courses', end: true },
+  { to: '/my-learning/transcript', label: 'Transcript', end: true },
+  { to: '/my-learning/export', label: 'Export CPD', end: true },
+  { to: '/webinars/upcoming', label: 'Upcoming Webinars', end: true },
+  { to: '/webinars/history', label: 'Webinar History', end: true },
 ]
 
-const adminNav: { to: string; label: string; roles?: UserRole[] }[] = [
-  { to: '/admin', label: 'Admin Home' },
+/** Course workflow and catalog management (instructor, content_admin, super_admin). */
+const contentNav: SideNavItem[] = [
+  { to: '/admin/courses', label: 'Courses', roles: courseRoles },
   { to: '/admin/courses/new', label: 'Create Draft', roles: courseRoles },
   { to: '/admin/courses/drafts', label: 'Draft Prep', roles: courseRoles },
   { to: '/admin/courses/review', label: 'Review Queue', roles: courseRoles },
   { to: '/admin/courses/published', label: 'Published Catalog', roles: courseRoles },
+]
+
+/** Admin home, people ops, and reporting (role-gated per item). */
+const adminNav: SideNavItem[] = [
+  { to: '/admin', label: 'Admin Home', end: true },
   { to: '/admin/invites', label: 'Invite Ops', roles: peopleRoles },
   { to: '/admin/users', label: 'Admin Users', roles: peopleRoles },
   { to: '/admin/reports/snapshot', label: 'Report Snapshot' },
   { to: '/admin/reports/completions', label: 'Report Completions' },
   { to: '/admin/reports/progress', label: 'Report Progress' },
 ]
+
+function visibleNavItems(role: UserRole, items: SideNavItem[]): SideNavItem[] {
+  return items.filter((item) => !item.roles || item.roles.includes(role))
+}
 
 export function AppLayout() {
   const user = useCurrentUser()
@@ -40,6 +52,9 @@ export function AppLayout() {
       </main>
     )
   }
+
+  const contentLinks = visibleNavItems(user.role, contentNav)
+  const adminLinks = visibleNavItems(user.role, adminNav)
 
   return (
     <div className="app-shell app-shell--learner">
@@ -62,24 +77,35 @@ export function AppLayout() {
 
           <nav className="side-nav">
             <div className="side-nav__group">
-              <p className="side-nav__label">Learn</p>
+              <p className="side-nav__label">Learning</p>
               {learnerNav.map((item) => (
-                <NavLink key={item.to} to={item.to} end>
+                <NavLink key={item.to} to={item.to} end={item.end}>
                   {item.label}
                 </NavLink>
               ))}
             </div>
 
-            <div className="side-nav__group">
-              <p className="side-nav__label">Operate</p>
-              {adminNav
-                .filter((item) => !item.roles || item.roles.includes(user.role))
-                .map((item) => (
-                  <NavLink key={item.to} to={item.to}>
+            {contentLinks.length > 0 ? (
+              <div className="side-nav__group">
+                <p className="side-nav__label">Content</p>
+                {contentLinks.map((item) => (
+                  <NavLink key={item.to} to={item.to} end={item.end}>
                     {item.label}
                   </NavLink>
                 ))}
-            </div>
+              </div>
+            ) : null}
+
+            {adminLinks.length > 0 ? (
+              <div className="side-nav__group">
+                <p className="side-nav__label">Admin</p>
+                {adminLinks.map((item) => (
+                  <NavLink key={item.to} to={item.to} end={item.end}>
+                    {item.label}
+                  </NavLink>
+                ))}
+              </div>
+            ) : null}
           </nav>
         </div>
 
