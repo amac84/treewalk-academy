@@ -5,8 +5,11 @@ import type { UserRole } from '../../types'
 const roleOptions: UserRole[] = ['learner', 'instructor', 'content_admin', 'hr_admin', 'super_admin']
 
 export function AdminInvitesPage() {
-  const { invites, inviteUser } = useAppStore()
+  const { invites, inviteUser, deletePendingInvite } = useAppStore()
   const pendingInvites = invites.filter((invite) => invite.status === 'pending')
+
+  const confirmDeleteInvite = (email: string, code: string) =>
+    window.confirm(`Cancel this invite for ${email}?\n\nCode ${code} will no longer work.`)
 
   return (
     <section className="page admin-users-page">
@@ -81,6 +84,7 @@ export function AdminInvitesPage() {
                 <th>Role</th>
                 <th>Invite code</th>
                 <th>Created</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -92,6 +96,20 @@ export function AdminInvitesPage() {
                     <code>{invite.code}</code>
                   </td>
                   <td>{new Date(invite.createdAt).toLocaleDateString()}</td>
+                  <td>
+                    <div className="admin-user-row-actions">
+                      <button
+                        type="button"
+                        className="ghost-btn ghost-btn--danger"
+                        onClick={() => {
+                          if (!confirmDeleteInvite(invite.email, invite.code)) return
+                          deletePendingInvite(invite.id)
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>

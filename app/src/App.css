@@ -497,6 +497,43 @@ body {
   border: 1px solid color-mix(in oklab, var(--accent) 28%, transparent);
 }
 
+.catalog-sync-callout {
+  margin-bottom: 1.25rem;
+  padding: 1rem 1.15rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-soft);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.catalog-sync-callout__title {
+  margin: 0 0 0.45rem;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.catalog-sync-callout--blocked {
+  border-color: color-mix(in oklab, var(--danger) 35%, var(--border-soft));
+  background: color-mix(in oklab, var(--danger) 8%, white);
+}
+
+.catalog-sync-callout--loading {
+  border-color: color-mix(in oklab, var(--accent) 22%, var(--border-soft));
+}
+
+.catalog-sync-callout--muted {
+  border-color: color-mix(in oklab, var(--text-secondary) 18%, var(--border-soft));
+}
+
+.catalog-sync-callout__list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.catalog-sync-callout__list li {
+  margin-bottom: 0.35rem;
+}
+
 .demo-data-strip-bleed {
   width: 100vw;
   position: relative;
@@ -2048,6 +2085,60 @@ th {
 .admin-users-page {
   display: grid;
   gap: var(--space-5);
+}
+
+.role-reference__list {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.role-reference__item {
+  padding: var(--space-3);
+  border-radius: 10px;
+  border: 1px solid var(--border-soft);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.role-reference__role {
+  margin: 0;
+  font-weight: 650;
+  font-size: 0.95rem;
+  letter-spacing: 0.01em;
+}
+
+.role-reference__summary {
+  margin: 0.4rem 0 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.inline-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.88em;
+  padding: 0.08em 0.35em;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.admin-user-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.admin-users-page .ghost-btn--danger {
+  color: var(--danger);
+  border-color: color-mix(in oklab, var(--danger) 35%, var(--border-mid));
+}
+
+.admin-users-page .ghost-btn--danger:hover {
+  background: color-mix(in oklab, var(--danger) 8%, white);
 }
 
 .admin-section {
