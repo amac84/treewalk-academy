@@ -1,7 +1,8 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { getAppSettings } from './appSettings'
 
-let client: SupabaseClient | null | undefined
+/** Set only after a successful `createClient` — never cache `null`, or a first call before settings load sticks forever (`null !== undefined`). */
+let client: SupabaseClient | undefined
 
 /** Same pattern as mux Edge URL: explicit project URL, else infer from feedback function URL. */
 function resolvedSupabaseProjectUrl(): string | undefined {
@@ -63,11 +64,10 @@ export function hasSupabaseBrowserEnv(): boolean {
 
 /** Returns null when Supabase env is not configured (mock-auth-only mode). */
 export function getSupabaseBrowserClient(): SupabaseClient | null {
-  if (client !== undefined) {
+  if (client) {
     return client
   }
   if (!hasSupabaseBrowserEnv()) {
-    client = null
     return null
   }
   const url = resolvedSupabaseProjectUrl()!
