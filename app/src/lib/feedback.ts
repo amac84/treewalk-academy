@@ -1,3 +1,5 @@
+import { getAppSettings } from './appSettings'
+
 export type FeedbackSubmission = {
   message: string
   route: string
@@ -38,7 +40,7 @@ function normalizeFeedbackEndpoint(url: string): string {
 }
 
 function resolveFeedbackEndpoint(): string {
-  const raw = (import.meta.env.VITE_FEEDBACK_FUNCTION_URL as string | undefined)?.trim()
+  const raw = getAppSettings().feedbackFunctionUrl
   if (!raw) {
     return DEFAULT_FUNCTION_PATH
   }
@@ -47,7 +49,7 @@ function resolveFeedbackEndpoint(): string {
 
 /** Supabase’s gateway expects the anon (publishable) key on function calls from the browser. */
 function supabaseInvokeHeaders(): Record<string, string> {
-  const key = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim()
+  const key = getAppSettings().supabaseAnonKey
   if (!key) {
     return {}
   }
@@ -65,7 +67,7 @@ export async function submitFeedback(payload: FeedbackSubmission): Promise<Feedb
     return {
       success: false,
       error: import.meta.env.DEV
-        ? 'Feedback is not wired locally. Set VITE_FEEDBACK_FUNCTION_URL in app/.env to your hosted feedback URL (see .env.example).'
+        ? 'Feedback is not wired locally. Set feedbackFunctionUrl in app/public/app-settings.json to your hosted feedback URL.'
         : 'Feedback is not available in this build. Your team needs to turn on the feedback connection in hosting settings.',
     }
   }
@@ -76,7 +78,7 @@ export async function submitFeedback(payload: FeedbackSubmission): Promise<Feedb
         return {
           success: false,
           error: import.meta.env.DEV
-            ? 'VITE_FEEDBACK_FUNCTION_URL points at this site instead of your feedback API. Copy the function URL from your backend dashboard.'
+            ? 'feedbackFunctionUrl points at this site instead of your feedback API. Copy the function URL from your backend dashboard.'
             : 'Feedback is pointed at the wrong address. Ask your administrator to fix the feedback URL.',
         }
       }
@@ -84,7 +86,7 @@ export async function submitFeedback(payload: FeedbackSubmission): Promise<Feedb
       return {
         success: false,
         error: import.meta.env.DEV
-          ? 'VITE_FEEDBACK_FUNCTION_URL is not a valid URL. Use a full https://… link from your backend dashboard.'
+          ? 'feedbackFunctionUrl is not a valid URL. Use a full https://… link from your backend dashboard.'
           : 'Feedback address is invalid. Ask your administrator to check configuration.',
       }
     }
@@ -141,7 +143,7 @@ export async function submitFeedback(payload: FeedbackSubmission): Promise<Feedb
       return {
         success: false,
         error: import.meta.env.DEV
-          ? 'Feedback endpoint not found. Set VITE_FEEDBACK_FUNCTION_URL in app/.env and restart the dev server.'
+          ? 'Feedback endpoint not found. Set feedbackFunctionUrl in app/public/app-settings.json and restart the dev server.'
           : 'Feedback could not be sent — the service may not be deployed yet.',
       }
     }
@@ -164,19 +166,19 @@ export async function submitFeedback(payload: FeedbackSubmission): Promise<Feedb
         }
       })()
       const needsSupabaseHeaders = host.endsWith('.supabase.co')
-      const hasAnon = Boolean((import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim())
+      const hasAnon = Boolean(getAppSettings().supabaseAnonKey)
       if (needsSupabaseHeaders && !hasAnon) {
         return {
           success: false,
           error: import.meta.env.DEV
-            ? 'Missing VITE_SUPABASE_ANON_KEY for this feedback URL. Add it to app/.env (same public key as the rest of the app).'
+            ? 'Missing supabaseAnonKey for this feedback URL. Add it to app/public/app-settings.json.'
             : 'Feedback could not be sent. Your team may need to add the public app key to hosting environment variables.',
         }
       }
       return {
         success: false,
         error: import.meta.env.DEV
-          ? 'Server refused the feedback request (405). Confirm VITE_FEEDBACK_FUNCTION_URL is the full function URL from your backend dashboard.'
+          ? 'Server refused the feedback request (405). Confirm feedbackFunctionUrl is the full function URL from your backend dashboard.'
           : 'Feedback could not be sent. Your team should verify the feedback URL and latest deploy.',
       }
     }

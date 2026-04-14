@@ -555,14 +555,10 @@ body {
   padding: 0 0 var(--space-5);
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem;
   color: var(--text-secondary);
   font-size: 0.93rem;
-}
-
-.bottom-bar span {
-  max-width: 42ch;
 }
 
 .bottom-bar a {
@@ -753,6 +749,9 @@ label {
 }
 
 button,
+a.btn-primary,
+a.btn-secondary,
+a.btn-ghost,
 .button,
 .btn,
 .ghost-btn,
@@ -768,6 +767,8 @@ button,
   align-items: center;
   justify-content: center;
   white-space: nowrap;
+  text-decoration: none;
+  box-sizing: border-box;
   transition:
     transform 120ms ease,
     background-color 120ms ease,
@@ -775,11 +776,19 @@ button,
     border-color 120ms ease;
 }
 
+a.btn-secondary:visited,
+a.btn-ghost:visited {
+  color: inherit;
+}
+
 button:hover,
 .button:hover,
 .btn:hover,
 .ghost-btn:hover,
-.action-link:hover {
+.action-link:hover,
+a.btn-primary:hover,
+a.btn-secondary:hover,
+a.btn-ghost:hover {
   transform: translateY(-1px);
 }
 
@@ -797,6 +806,10 @@ button,
 .btn-primary,
 .action-link--primary {
   background: var(--accent);
+  color: oklch(0.98 0.01 85);
+}
+
+.btn-primary:visited {
   color: oklch(0.98 0.01 85);
 }
 
@@ -879,10 +892,24 @@ button,
   flex-wrap: wrap;
 }
 
+.course-card__header-tags {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.2rem;
+  text-align: right;
+}
+
 .course-card__level,
 .table-role {
   color: var(--text-secondary);
   text-transform: capitalize;
+}
+
+.course-card__audience {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.3;
 }
 
 .course-card__summary {
@@ -900,6 +927,15 @@ button,
 .course-card__cta {
   display: inline-flex;
   width: fit-content;
+}
+
+.clerk-auth-panel {
+  max-width: 28rem;
+  margin: 0 auto 2rem;
+}
+
+.clerk-user-control {
+  margin-top: 0.5rem;
 }
 
 .progress-pill,
@@ -1437,6 +1473,27 @@ button,
   width: min(760px, 100%);
 }
 
+.quiz-pass-card .muted {
+  max-width: 52ch;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.quiz-pass-card .button-row {
+  margin-top: var(--space-2);
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.quiz-history {
+  width: min(760px, 100%);
+}
+
+.quiz-history h2 {
+  margin: 0 0 var(--space-2);
+  font-size: 1.15rem;
+}
+
 .quiz-progress {
   display: flex;
   justify-content: space-between;
@@ -1476,6 +1533,22 @@ button,
 .transcript-page {
   display: grid;
   gap: var(--space-4);
+}
+
+.transcript-table-wrap button.transcript-cert-download {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  text-decoration: underline;
+  letter-spacing: normal;
+  white-space: nowrap;
+}
+
+.transcript-table-wrap button.transcript-cert-download:hover {
+  color: color-mix(in oklab, var(--accent) 55%, var(--text-primary));
 }
 
 .document-panel {

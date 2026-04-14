@@ -1,5 +1,6 @@
 import { Link, useParams } from 'react-router-dom'
 import { JourneyTaskFooter } from '../../components/common/JourneyTaskFooter'
+import { quizOptionBody } from '../../lib/quizOptionLabel'
 import { ensureQuizPolicy } from '../../lib/quizPolicy'
 import { useCourseWorkflowScope } from './courseWorkflow'
 
@@ -78,13 +79,17 @@ export function AdminCourseQuizBankPage() {
                 <ul className="simple-list">
                   {question.options.map((option, optionIndex) => (
                     <li key={option.id}>
-                      <strong>{String.fromCharCode(65 + optionIndex)}.</strong> {option.label}
+                      <strong>{String.fromCharCode(65 + optionIndex)}.</strong>{' '}
+                      {quizOptionBody(option.label)}
                       {option.isCorrect ? ' (correct)' : ''}
                     </li>
                   ))}
                 </ul>
                 {question.explanation ? <p className="muted">Explanation: {question.explanation}</p> : null}
-                <p className="meta-line">Answer key: {correctOption?.label ?? 'Missing correct option'}</p>
+                <p className="meta-line">
+                  Answer key:{' '}
+                  {correctOption ? quizOptionBody(correctOption.label) : 'Missing correct option'}
+                </p>
                 <div className="button-row">
                   <button
                     type="button"

@@ -18,6 +18,16 @@ import { buildQuizPolicy } from '../../lib/quizPolicy'
 import type { QuizQuestion } from '../../types'
 import { COURSE_TOPICS, useCourseWorkflowScope } from './courseWorkflow'
 
+function quizBankSuccessDetail(questionCount: number): string {
+  if (questionCount === 0) {
+    return 'Quiz bank was saved to this draft, but no questions were generated from the transcript.'
+  }
+  if (questionCount === 1) {
+    return 'Quiz bank with 1 question was generated from transcript content and saved to this draft.'
+  }
+  return `Quiz bank with ${questionCount} questions was generated from transcript content and saved to this draft.`
+}
+
 type UploadOutcome =
   | {
       kind: 'success'
@@ -26,6 +36,7 @@ type UploadOutcome =
       transcriptOk: boolean
       metadataDrafted?: boolean
       quizDrafted?: boolean
+      quizQuestionCount?: number
       metadataError?: string
       quizError?: string
       transcriptError?: string
@@ -93,7 +104,7 @@ export function AdminCourseCreatePage() {
     if (!isMuxFunctionConfigured()) {
       setError(
         import.meta.env.DEV
-          ? 'Video upload is not configured. Set VITE_SUPABASE_URL (mux defaults to …/functions/v1/mux) or VITE_MUX_FUNCTION_URL in app/.env, then restart the dev server.'
+          ? 'Video upload is not configured. Set supabaseUrl (mux defaults to …/functions/v1/mux) or muxFunctionUrl in app/public/app-settings.json, then restart the dev server.'
           : 'Video upload is not set up on this site. Ask your administrator to finish configuration.',
       )
       return
@@ -111,6 +122,7 @@ export function AdminCourseCreatePage() {
       category: '',
       topic: 'Technology',
       level: 'beginner',
+      audience: 'everyone',
       instructorId: store.currentUserId,
       videoMinutes: 15,
     })
@@ -211,6 +223,7 @@ export function AdminCourseCreatePage() {
         })
         let metadataDrafted = false
         let quizDrafted = false
+        let quizQuestionCount: number | undefined
         let metadataError: string | undefined
         let quizError: string | undefined
         let finalCourseTitle = create.course.title
@@ -239,6 +252,7 @@ export function AdminCourseCreatePage() {
             category: nextCategory,
             topic: nextTopic,
             level: latestCourse.level,
+            audience: latestCourse.audience,
             instructorId: latestCourse.instructorId,
           })
           if (!saveMetadata.ok) {
@@ -276,6 +290,7 @@ export function AdminCourseCreatePage() {
             quizError = saveQuiz.message ?? 'Could not save AI-generated quiz bank.'
           } else {
             quizDrafted = true
+            quizQuestionCount = quizDraft.questions.length
           }
         } catch (quizDraftError) {
           quizError =
@@ -289,6 +304,7 @@ export function AdminCourseCreatePage() {
           transcriptOk: true,
           metadataDrafted,
           quizDrafted,
+          quizQuestionCount,
           metadataError,
           quizError,
         })
@@ -362,15 +378,15 @@ export function AdminCourseCreatePage() {
             <p className="inline-error small-copy">
               {import.meta.env.DEV ? (
                 <>
-                  Set <code>VITE_SUPABASE_URL</code> so the app can call the mux function at{' '}
-                  <code>…/functions/v1/mux</code> on that host, or set <code>VITE_MUX_FUNCTION_URL</code> in{' '}
-                  <code>app/.env</code>. Deploy the mux Edge Function if needed, then restart <code>npm run dev</code>.
+                  Set <code>supabaseUrl</code> so the app can call the mux function at <code>…/functions/v1/mux</code>{' '}
+                  on that host, or set <code>muxFunctionUrl</code> in <code>app/public/app-settings.json</code>.
+                  Deploy the mux Edge Function if needed, then restart <code>npm run dev</code>.
                 </>
               ) : (
                 <>
                   Video upload is not configured. Your administrator should set{' '}
-                  <code>VITE_SUPABASE_URL</code> (or <code>VITE_MUX_FUNCTION_URL</code>, or{' '}
-                  <code>VITE_FEEDBACK_FUNCTION_URL</code> pointing at the same Supabase project) in the hosting build
+                  <code>supabaseUrl</code> (or <code>muxFunctionUrl</code>, or <code>feedbackFunctionUrl</code>{' '}
+                  pointing at the same Supabase project) in the deployed app settings
                   environment, redeploy, and ensure the mux Edge Function is deployed.
                 </>
               )}
@@ -494,7 +510,9 @@ export function AdminCourseCreatePage() {
                   {uploadOutcome.transcriptOk ? (
                     uploadOutcome.quizDrafted ? (
                       <span className="upload-outcome-steps__detail">
-                        Quiz bank was generated from transcript content and saved to this draft.
+                        {uploadOutcome.quizQuestionCount != null
+                          ? quizBankSuccessDetail(uploadOutcome.quizQuestionCount)
+                          : 'Quiz bank was generated from transcript content and saved to this draft.'}
                       </span>
                     ) : (
                       <div className="upload-outcome-steps__detail">

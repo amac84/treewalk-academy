@@ -15,6 +15,9 @@ if (!envPath) {
   process.exit(1)
 }
 const lines = readFileSync(envPath, 'utf8').split(/\r?\n/)
+const appSettingsPath = join(root, 'app', 'public', 'app-settings.json')
+const appSettings =
+  existsSync(appSettingsPath) ? JSON.parse(readFileSync(appSettingsPath, 'utf8')) : {}
 
 /** @type {Record<string, string>} */
 const env = {}
@@ -26,9 +29,9 @@ for (const line of lines) {
 }
 
 const pass = env.SUPABASE_DATABASE_PASSWORD
-const supabaseUrl = env.VITE_SUPABASE_URL
+const supabaseUrl = env.VITE_SUPABASE_URL || appSettings.supabaseUrl
 if (!pass || !supabaseUrl) {
-  console.error('Need SUPABASE_DATABASE_PASSWORD and VITE_SUPABASE_URL in .env')
+  console.error('Need SUPABASE_DATABASE_PASSWORD in .env and supabaseUrl in app/public/app-settings.json')
   console.error(`Using file: ${envPath}`)
   console.error(`Keys found: ${Object.keys(env).join(', ') || '(none)'}`)
   process.exit(1)
@@ -36,14 +39,14 @@ if (!pass || !supabaseUrl) {
 
 const refMatch = supabaseUrl.match(/^https:\/\/([^.]+)\.supabase\.co/)
 if (!refMatch) {
-  console.error('VITE_SUPABASE_URL must be like https://<project-ref>.supabase.co')
+  console.error('supabaseUrl must be like https://<project-ref>.supabase.co')
   process.exit(1)
 }
 const projectRef = refMatch[1]
 const encoded = encodeURIComponent(pass)
 const dbUrl = `postgresql://postgres:${encoded}@db.${projectRef}.supabase.co:5432/postgres`
 
-const result = spawnSync('npx', ['supabase', 'db', 'push', '--db-url', dbUrl], {
+const result = spawnSync('npx', ['supabase@latest', 'db', 'push', '--db-url', dbUrl], {
   cwd: root,
   stdio: 'inherit',
   shell: true,

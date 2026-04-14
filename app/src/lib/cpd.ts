@@ -1,4 +1,6 @@
 import { CPD_QUARTER_HOUR_INCREMENT } from '../constants'
+import type { Course, TranscriptEntry } from '../types'
+import { getCpdProviderName } from './appSettings'
 
 type CourseLikeForCpd = {
   videoMinutes: number
@@ -23,4 +25,21 @@ export const getCourseCPDHours = (course: CourseLikeForCpd): number =>
 
 export function formatCpdHours(hours: number): string {
   return `${hours.toFixed(2)} CPD hours`
+}
+
+/**
+ * Provider shown on transcript, CSV export, and PDF certificates. Prefers the
+ * current course document (`cpdProviderName` from catalog) so re-downloads stay
+ * aligned with Supabase after provider updates, then the stored transcript row.
+ */
+export function resolveCpdProviderForTranscriptEntry(
+  entry: TranscriptEntry,
+  courses: readonly Course[],
+): string {
+  const course = courses.find((c) => c.id === entry.courseId)
+  const fromCourse = course?.cpdProviderName?.trim()
+  if (fromCourse) return fromCourse
+  const fromEntry = entry.providerName?.trim()
+  if (fromEntry) return fromEntry
+  return getCpdProviderName()
 }

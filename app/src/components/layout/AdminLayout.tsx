@@ -1,4 +1,5 @@
 import { Link, NavLink, Outlet } from 'react-router-dom'
+import { ClerkUserControl } from '../auth/ClerkUserControl'
 import { useCurrentUser } from '../../hooks/useAppStore'
 import { CourseSyncBanner } from '../common/CourseSyncBanner'
 import type { UserRole } from '../../types'
@@ -29,6 +30,12 @@ export function AdminLayout() {
             <p className="brand-note">Operational view for catalog, reporting, and user controls.</p>
           </div>
 
+          <div className="user-meta" style={{ marginBottom: '1rem' }}>
+            <span className="user-meta__eyebrow">Signed in</span>
+            <strong>{user?.name}</strong>
+            <ClerkUserControl />
+          </div>
+
           <nav className="side-nav side-nav--admin">
             <div className="side-nav__group">
               <p className="side-nav__label">Operations</p>
@@ -42,7 +49,6 @@ export function AdminLayout() {
         </div>
 
         <div className="sidebar-footer">
-          <p>Dense, quiet, accountable.</p>
           <Link to="/home">← Back to learner mode</Link>
         </div>
       </aside>

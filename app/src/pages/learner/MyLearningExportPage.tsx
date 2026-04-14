@@ -1,5 +1,6 @@
 import { JourneyTaskFooter } from '../../components/common/JourneyTaskFooter'
 import { useAppStore, useCurrentUser } from '../../hooks/useAppStore'
+import { resolveCpdProviderForTranscriptEntry } from '../../lib/cpd'
 
 function toCsvCell(value: string) {
   const escaped = value.replace(/"/g, '""')
@@ -8,7 +9,7 @@ function toCsvCell(value: string) {
 
 export function MyLearningExportPage() {
   const user = useCurrentUser()
-  const { transcriptForCurrentUser } = useAppStore()
+  const { transcriptForCurrentUser, courses } = useAppStore()
 
   if (!user) {
     return <p>Unable to load learner profile.</p>
@@ -32,7 +33,7 @@ export function MyLearningExportPage() {
       entry.courseTitle,
       new Date(entry.completedAt).toISOString(),
       entry.cpdHours.toFixed(2),
-      entry.providerName,
+      resolveCpdProviderForTranscriptEntry(entry, courses),
       `${entry.passThreshold}%`,
       entry.quizAttemptId,
       entry.activityWatchedMinutes.toFixed(2),

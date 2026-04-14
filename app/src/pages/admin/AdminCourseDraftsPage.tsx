@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useAuth } from '@clerk/react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { Link } from 'react-router-dom'
 import { JourneyTaskFooter } from '../../components/common/JourneyTaskFooter'
-import type { CourseLevel, CourseTopic } from '../../types'
+import { COURSE_AUDIENCE_LABELS } from '../../constants'
+import { isClerkConfigured } from '../../lib/clerkEnv'
+import type { Course, CourseAudience, CourseLevel, CourseTopic } from '../../types'
 import {
+  COURSE_AUDIENCES,
   COURSE_LEVELS,
   COURSE_TOPICS,
   type CourseDetailsDraft,
@@ -17,6 +21,74 @@ const AUTOSAVE_DEBOUNCE_MS = 900
 const SAVED_STATUS_CLEAR_MS = 2500
 
 type AutoSaveUiStatus = 'idle' | 'saving' | 'saved'
+
+type DeleteDraftStore = {
+  deleteDraftCourse: (
+    courseId: string,
+    options?: { clerkSessionToken?: string | null },
+  ) => Promise<{ ok: boolean; message?: string }>
+}
+
+/** Must render only under `ClerkProvider` (when Clerk publishable key is set). */
+function DraftCourseDeleteButton(props: {
+  course: Course
+  deletingId: string | null
+  setDeletingId: (id: string | null) => void
+  setError: (msg: string | null) => void
+  setCourseDrafts: Dispatch<SetStateAction<Record<string, CourseDetailsDraft>>>
+  store: DeleteDraftStore
+}) {
+  const { course, deletingId, setDeletingId, setError, setCourseDrafts, store } = props
+  const { getToken } = useAuth()
+
+  const handleDelete = async () => {
+    const label = course.title.trim() || 'this draft'
+    const hasMux = Boolean(course.muxAssetId?.trim())
+    const confirmMessage = hasMux
+      ? `Delete “${label}”? This removes the draft from the catalog and permanently deletes the hosted video in Mux (frees asset quota). This cannot be undone.`
+      : `Delete “${label}”? This removes the draft from the shared catalog permanently. This cannot be undone.`
+    if (!window.confirm(confirmMessage)) {
+      return
+    }
+    setDeletingId(course.id)
+    setError(null)
+    let token: string | null = null
+    try {
+      token = (await getToken()) ?? null
+    } catch (e) {
+      setDeletingId(null)
+      const msg = e instanceof Error ? e.message : String(e)
+      setError(
+        /failed to fetch|network/i.test(msg)
+          ? 'Could not reach Clerk to verify your session (network error). Check your connection or VPN, then try again.'
+          : msg || 'Could not refresh your session.',
+      )
+      return
+    }
+    const result = await store.deleteDraftCourse(course.id, { clerkSessionToken: token })
+    setDeletingId(null)
+    if (!result.ok) {
+      setError(result.message ?? 'Could not delete draft.')
+      return
+    }
+    setCourseDrafts((prev) => {
+      const next = { ...prev }
+      delete next[course.id]
+      return next
+    })
+  }
+
+  return (
+    <button
+      type="button"
+      className="button--secondary"
+      disabled={deletingId === course.id}
+      onClick={() => void handleDelete()}
+    >
+      {deletingId === course.id ? 'Deleting…' : 'Delete draft'}
+    </button>
+  )
+}
 
 export function AdminCourseDraftsPage() {
   const { store, editableCourses, canAssignInstructor, instructorOptions } = useCourseWorkflowScope()
@@ -91,13 +163,14 @@ export function AdminCourseDraftsPage() {
     return () => debounceTimers.forEach(clearTimeout)
   }, [courseDrafts, drafts, canAssignInstructor])
 
-  const deleteDraft = async (course: { id: string; title: string }) => {
+  /** Local / demo tree without ClerkProvider — cannot call Mux delete from the browser. */
+  const deleteDraftWithoutClerk = async (course: Course) => {
     const label = course.title.trim() || 'this draft'
-    if (
-      !window.confirm(
-        `Delete “${label}”? This removes the draft from the shared catalog permanently. This cannot be undone.`,
-      )
-    ) {
+    const hasMux = Boolean(course.muxAssetId?.trim())
+    const confirmMessage = hasMux
+      ? `Delete “${label}”? This removes the draft from the catalog only. The video file is not removed from Mux in this mode — use the Mux dashboard or sign in with Clerk to free quota.`
+      : `Delete “${label}”? This removes the draft from the shared catalog permanently. This cannot be undone.`
+    if (!window.confirm(confirmMessage)) {
       return
     }
     setDeletingId(course.id)
@@ -123,6 +196,7 @@ export function AdminCourseDraftsPage() {
     category: string
     topic: CourseTopic
     level: CourseLevel
+    audience: CourseAudience
     instructorId: string
   }): CourseDetailsDraft => courseDrafts[course.id] ?? courseDetailsDraftFromCourse(course)
 
@@ -215,14 +289,25 @@ export function AdminCourseDraftsPage() {
                     <Link className="link-button" to={`/admin/courses/${course.id}/quiz-bank`}>
                       Review quiz bank
                     </Link>
-                    <button
-                      type="button"
-                      className="button--secondary"
-                      disabled={deletingId === course.id}
-                      onClick={() => void deleteDraft(course)}
-                    >
-                      {deletingId === course.id ? 'Deleting…' : 'Delete draft'}
-                    </button>
+                    {isClerkConfigured() ? (
+                      <DraftCourseDeleteButton
+                        course={course}
+                        deletingId={deletingId}
+                        setDeletingId={setDeletingId}
+                        setError={setError}
+                        setCourseDrafts={setCourseDrafts}
+                        store={store}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="button--secondary"
+                        disabled={deletingId === course.id}
+                        onClick={() => void deleteDraftWithoutClerk(course)}
+                      >
+                        {deletingId === course.id ? 'Deleting…' : 'Delete draft'}
+                      </button>
+                    )}
                   </div>
                 </header>
 
@@ -326,6 +411,26 @@ export function AdminCourseDraftsPage() {
                       </select>
                     </label>
                   </div>
+
+                  <label htmlFor={`course-audience-${course.id}`}>
+                    Audience
+                    <p className="draft-field-hint">
+                      Internal use is for firm-only training; Everyone appears as open to all learners in the catalog.
+                    </p>
+                    <select
+                      id={`course-audience-${course.id}`}
+                      value={draft.audience}
+                      onChange={(event) =>
+                        updateCourseDraft(course.id, 'audience', event.target.value as CourseAudience, draft)
+                      }
+                    >
+                      {COURSE_AUDIENCES.map((value) => (
+                        <option key={value} value={value}>
+                          {COURSE_AUDIENCE_LABELS[value]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
 
                   {canAssignInstructor ? (
                     <label htmlFor={`course-instructor-${course.id}`}>

@@ -15,6 +15,7 @@ const baseCourse: Course = {
   category: 'Ethics',
   topic: 'Ethics',
   level: 'beginner',
+  audience: 'everyone',
   instructorId: 'u-1',
   status: 'published',
   videoMinutes: 60,

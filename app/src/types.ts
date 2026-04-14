@@ -7,9 +7,14 @@ export type UserRole =
   | 'hr_admin'
   | 'super_admin'
 
+/** Treewalk-address users vs external learners (see Clerk + email domain config). */
+export type UserAccessScope = 'internal' | 'external'
+
 export type UserStatus = 'active' | 'suspended'
 export type InviteStatus = 'pending' | 'accepted' | 'revoked'
 export type CourseStatus = 'draft' | 'review' | 'published'
+/** Who the course is intended for: firm-only vs open to all learners. */
+export type CourseAudience = 'internal' | 'everyone'
 export type CourseLevel = 'beginner' | 'intermediate' | 'advanced'
 export type CourseTopic =
   | 'Ethics'
@@ -20,11 +25,23 @@ export type CourseTopic =
   | 'Leadership'
   | 'Advisory'
 
+/** Runtime values for forms and AI allow-lists; keep synced with mux Edge defaults. */
+export const COURSE_TOPIC_VALUES = [
+  'Ethics',
+  'Tax',
+  'Audit',
+  'Financial Reporting',
+  'Technology',
+  'Leadership',
+  'Advisory',
+] as const satisfies readonly CourseTopic[]
+
 export interface User {
   id: string
   name: string
   email: string
   role: UserRole
+  accessScope: UserAccessScope
   status: UserStatus
   invitedAt: string
   joinedAt: string
@@ -82,6 +99,28 @@ export interface QuizPolicy {
   sourceModel?: string
 }
 
+export type CoursePackageRuntimeMode = 'single_sco' | 'multi_sco'
+export type CoursePackageMediaDelivery = 'stream' | 'packaged_file'
+
+/**
+ * Export-facing metadata for future SCORM/package generation.
+ * This remains authored content metadata and should not include learner runtime evidence.
+ */
+export interface CoursePackageProfile {
+  schemaVersion: number
+  locale: string
+  runtimeMode: CoursePackageRuntimeMode
+  mediaDelivery: CoursePackageMediaDelivery
+  manifestIdentifier?: string
+}
+
+export interface CoursePackageActivity {
+  id: string
+  title: string
+  type: 'video_assessment' | 'resource'
+  required: boolean
+}
+
 export interface VideoWatchProgress {
   durationSeconds: number
   watchedSeconds: number
@@ -102,6 +141,7 @@ export interface Course {
   category: string
   topic: CourseTopic
   level: CourseLevel
+  audience: CourseAudience
   instructorId: string
   status: CourseStatus
   videoMinutes: number
@@ -115,7 +155,14 @@ export interface Course {
   transcriptText?: string
   transcriptStatus?: VideoTranscriptStatus
   transcriptErrorMessage?: string
+  packageProfile?: CoursePackageProfile
+  activityOutline?: CoursePackageActivity[]
   cpdHoursOverride?: number | null
+  /**
+   * CPD / certificate provider for this course when set (e.g. legal entity).
+   * Persisted in `academy_courses.data`; falls back to app `cpdProviderName` when absent.
+   */
+  cpdProviderName?: string | null
   version: number
   createdAt: string
   updatedAt: string
@@ -276,6 +323,11 @@ export interface AppState {
   users: User[]
   invites: Invite[]
   courses: Course[]
+  /**
+   * Course IDs removed from the shared catalog by an author (persisted with learner runtime).
+   * Prevents seed/mock courses from reappearing after a successful DB delete.
+   */
+  removedCatalogCourseIds: string[]
   enrollments: Enrollment[]
   progress: Record<string, Progress>
   completions: Completion[]

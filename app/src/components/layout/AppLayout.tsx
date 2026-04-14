@@ -1,4 +1,5 @@
 import { Link, NavLink, Outlet } from 'react-router-dom'
+import { ClerkUserControl } from '../auth/ClerkUserControl'
 import { CourseSyncBanner } from '../common/CourseSyncBanner'
 import { useCurrentUser, useRoleLabel } from '../../hooks/useAppStore'
 import type { UserRole } from '../../types'
@@ -50,9 +51,13 @@ export function AppLayout() {
           </div>
 
           <div className="user-meta">
-            <span className="user-meta__eyebrow">Current learner</span>
+            <span className="user-meta__eyebrow">Signed in</span>
             <strong>{user.name}</strong>
-            <span>{roleLabel}</span>
+            {user.role !== 'learner' ? <span>{roleLabel}</span> : null}
+            <span className="muted small-copy">
+              Catalog: {user.accessScope === 'internal' ? 'Internal + everyone' : 'Everyone'}
+            </span>
+            <ClerkUserControl />
           </div>
 
           <nav className="side-nav">
@@ -90,7 +95,6 @@ export function AppLayout() {
           <Outlet />
         </main>
         <footer className="bottom-bar">
-          <span>Momentum first. Resume quickly, record cleanly, keep evidence ready.</span>
           <Link to="/my-learning/transcript">View transcript</Link>
         </footer>
       </div>

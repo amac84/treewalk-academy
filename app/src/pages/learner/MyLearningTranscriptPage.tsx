@@ -1,6 +1,11 @@
+import { useCallback } from 'react'
+
 import { JourneyTaskFooter } from '../../components/common/JourneyTaskFooter'
 import { RETENTION_WINDOW_YEARS } from '../../constants'
 import { useAppStore, useCurrentUser } from '../../hooks/useAppStore'
+import { resolveCpdProviderForTranscriptEntry } from '../../lib/cpd'
+import { downloadCpdCompletionCertificate } from '../../lib/cpdCertificatePdf'
+import type { TranscriptEntry } from '../../types'
 
 function toPrettyDate(isoDate: string) {
   return new Date(isoDate).toLocaleDateString(undefined, {
@@ -12,7 +17,25 @@ function toPrettyDate(isoDate: string) {
 
 export function MyLearningTranscriptPage() {
   const user = useCurrentUser()
-  const { transcriptForCurrentUser, certificates } = useAppStore()
+  const { transcriptForCurrentUser, certificates, courses } = useAppStore()
+
+  const handleDownloadCertificate = useCallback(
+    (entry: TranscriptEntry) => {
+      const certificate = certificates.find((c) => c.id === entry.certificateId)
+      downloadCpdCompletionCertificate({
+        recipientName: user?.name ?? 'Learner',
+        providerName: resolveCpdProviderForTranscriptEntry(entry, courses),
+        courseTitle: entry.courseTitle,
+        cpdHours: entry.cpdHours,
+        completionDateIso: entry.completedAt,
+        issuedAtIso: certificate?.issuedAt ?? entry.completedAt,
+        passThreshold: entry.passThreshold,
+        verificationCode: entry.verificationCode,
+        certificateId: entry.certificateId,
+      })
+    },
+    [certificates, courses, user?.name],
+  )
 
   if (!user) {
     return <p>Unable to load learner profile.</p>
@@ -57,21 +80,18 @@ export function MyLearningTranscriptPage() {
                     <td>{entry.courseTitle}</td>
                     <td>{toPrettyDate(entry.completedAt)}</td>
                     <td>{entry.cpdHours.toFixed(2)}</td>
-                    <td>{entry.providerName}</td>
+                    <td>{resolveCpdProviderForTranscriptEntry(entry, courses)}</td>
                     <td>{entry.passThreshold}%</td>
                     <td>{entry.verificationCode}</td>
                     <td>
-                      <a
-                        href={`#certificate-${entry.certificateId}`}
-                        download
-                        title={
-                          certificates.find((certificate) => certificate.id === entry.certificateId)
-                            ? 'Certificate available'
-                            : 'Certificate'
-                        }
+                      <button
+                        type="button"
+                        className="transcript-cert-download"
+                        onClick={() => handleDownloadCertificate(entry)}
+                        title="Download PDF certificate of completion"
                       >
-                        Download
-                      </a>
+                        Download PDF
+                      </button>
                     </td>
                   </tr>
                 ))}

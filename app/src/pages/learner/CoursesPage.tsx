@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { CourseCard } from '../../components/common/CourseCard'
 import { useAppStore } from '../../hooks/useAppStore'
+import { learnerCanAccessCourse } from '../../lib/courseAccess'
 import type { CourseLevel, CourseTopic } from '../../types'
 
 const allTopics: CourseTopic[] = [
@@ -16,12 +17,17 @@ const allTopics: CourseTopic[] = [
 const allLevels: CourseLevel[] = ['beginner', 'intermediate', 'advanced']
 
 export function CoursesPage() {
-  const { courses } = useAppStore()
+  const { courses, currentUser } = useAppStore()
   const [topic, setTopic] = useState<CourseTopic | 'All'>('All')
   const [level, setLevel] = useState<CourseLevel | 'All'>('All')
   const [search, setSearch] = useState('')
 
-  const publishedCourses = courses.filter((course) => course.status === 'published')
+  const publishedCourses = courses.filter(
+    (course) =>
+      course.status === 'published' &&
+      currentUser !== null &&
+      learnerCanAccessCourse(currentUser, course),
+  )
 
   const filteredCourses = useMemo(() => {
     return publishedCourses.filter((course) => {

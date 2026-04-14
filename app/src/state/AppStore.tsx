@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { CERTIFICATE_PROVIDER_NAME } from '../constants'
+import { getCpdProviderName } from '../lib/appSettings'
 import { mockInitialState } from '../data/mockData'
 import {
   deleteCourseFromSupabase,
@@ -10,8 +10,12 @@ import {
 } from '../lib/coursePersistence'
 import { getCourseCPDHours } from '../lib/cpd'
 import { buildQuizPolicy, ensureQuizPolicy } from '../lib/quizPolicy'
-import { getSupabaseBrowserClient } from '../lib/supabaseClient'
+import { learnerCanAccessCourse } from '../lib/courseAccess'
+import { getClerkPublishableKey } from '../lib/clerkEnv'
+import { deleteMuxAsset, isMuxFunctionConfigured } from '../lib/muxEdge'
+import { getSupabaseBrowserClient, hasSupabaseBrowserEnv } from '../lib/supabaseClient'
 import { syncSupabaseSessionForAuthorRole } from '../lib/supabaseMuxSession'
+import { accessScopeFromEmail } from '../lib/treewalkEmail'
 import {
   evaluateCompletion,
   getWatchedPercentFromEnrollment,
@@ -21,6 +25,7 @@ import {
 import type {
   AppState,
   Course,
+  CourseAudience,
   CourseLevel,
   CoursesSyncStatus,
   CourseStatus,
@@ -64,7 +69,17 @@ const toRuntimeState = (state: AppState) => ({
   cpdLedger: state.cpdLedger,
   transcript: state.transcript,
   learningActivityLog: state.learningActivityLog,
+  removedCatalogCourseIds: state.removedCatalogCourseIds,
 })
+
+function normalizeRemovedCatalogCourseIdsFromRuntime(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const out = new Set<string>()
+  for (const item of raw) {
+    if (typeof item === 'string' && item.trim()) out.add(item.trim())
+  }
+  return [...out]
+}
 
 const createQuestionId = (courseId: string, index: number) => `${courseId}-q-${index + 1}`
 const createQuestionOptionId = (questionIndex: number, optionIndex: number) =>
@@ -72,6 +87,8 @@ const createQuestionOptionId = (questionIndex: number, optionIndex: number) =>
 
 const MAX_HEARTBEAT_DELTA_SECONDS = 12
 const MAX_POSITION_ADVANCE_SECONDS = 20
+const COURSE_PACKAGE_SCHEMA_VERSION = 1
+const DEFAULT_EXPORT_LOCALE = 'en-US'
 
 const ensureEnrollmentVideoProgress = (
   enrollment: Enrollment,
@@ -102,6 +119,9 @@ const canManageCourseMux = (role: UserRole | null, course: Course, userId: strin
 const canAuthorCourses = (role: UserRole | null): boolean =>
   role === 'instructor' || role === 'content_admin' || role === 'super_admin'
 
+const normalizeCourseAudience = (value: unknown): CourseAudience =>
+  value === 'internal' ? 'internal' : 'everyone'
+
 const sanitizeCourseDetails = (input: UpdateCourseInput): Omit<UpdateCourseInput, 'instructorId'> & { instructorId?: string } => ({
   title: input.title.trim(),
   summary: input.summary.trim(),
@@ -109,6 +129,7 @@ const sanitizeCourseDetails = (input: UpdateCourseInput): Omit<UpdateCourseInput
   category: input.category.trim(),
   topic: input.topic as CourseTopic,
   level: input.level as CourseLevel,
+  audience: normalizeCourseAudience(input.audience),
   instructorId: input.instructorId?.trim(),
 })
 
@@ -139,7 +160,9 @@ const canTransitionCourseStatus = (
 
 export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
   const [state, setState] = useState<AppState>(mockInitialState)
-  const [currentUserId, setCurrentUserId] = useState('u-learner-1')
+  const [currentUserId, setCurrentUserId] = useState<string>(() =>
+    getClerkPublishableKey() ? '' : 'u-learner-1',
+  )
   const [videoProcessingProgress, setVideoProcessingProgress] = useState<
     AppStoreContextValue['videoProcessingProgress']
   >({})
@@ -217,15 +240,20 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
     void (async () => {
       setCoursesSyncStatus('loading')
       try {
-        const [merged, runtime] = await Promise.all([
-          loadCoursesFromSupabase(mockInitialState.courses),
-          loadLearnerRuntimeStateFromSupabase(),
-        ])
+        const runtime = await loadLearnerRuntimeStateFromSupabase()
+        if (cancelled) return
+        const removedCatalogCourseIds = normalizeRemovedCatalogCourseIdsFromRuntime(
+          runtime?.removedCatalogCourseIds,
+        )
+        const merged = await loadCoursesFromSupabase(mockInitialState.courses, {
+          removedCatalogCourseIds,
+        })
         if (cancelled) return
         const runtimeEnrollments = runtime?.enrollments
         setState((s) => ({
           ...s,
           courses: merged,
+          removedCatalogCourseIds,
           enrollments: runtimeEnrollments ?? s.enrollments,
           progress: runtime?.progress ?? s.progress,
           completions: runtime?.completions ?? s.completions,
@@ -263,6 +291,7 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
     state.cpdLedger,
     state.transcript,
     state.learningActivityLog,
+    state.removedCatalogCourseIds,
     coursesSyncStatus,
   ])
 
@@ -271,6 +300,20 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
     [state.users, currentUserId],
   )
   const currentUserRole = currentUser?.role ?? null
+
+  const syncAuthUser = useCallback((user: User | null) => {
+    if (!user) {
+      setCurrentUserId('')
+      return
+    }
+    setState((prev) => ({
+      ...prev,
+      users: prev.users.some((u) => u.id === user.id)
+        ? prev.users.map((u) => (u.id === user.id ? user : u))
+        : [...prev.users, user],
+    }))
+    setCurrentUserId(user.id)
+  }, [])
 
   useEffect(() => {
     if (!getSupabaseBrowserClient()) return
@@ -318,6 +361,8 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       const latestAttempt = getLatestPassedAttempt(enrollment.quizAttempts)
       if (!latestAttempt) return draft
 
+      const cpdProviderName = course.cpdProviderName?.trim() || getCpdProviderName()
+
       const certificateId = createId('cert')
       const completionId = createId('comp')
       const now = new Date().toISOString()
@@ -347,7 +392,7 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
             courseId: enrollment.courseId,
             verificationCode,
             issuedAt: now,
-            providerName: CERTIFICATE_PROVIDER_NAME,
+            providerName: cpdProviderName,
             courseTitle: course.title,
             durationHours: cpdHours,
             completionDate: now,
@@ -377,7 +422,7 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
             cpdHours,
             certificateId,
             verificationCode,
-            providerName: CERTIFICATE_PROVIDER_NAME,
+            providerName: cpdProviderName,
             quizAttemptId: latestAttempt.id,
             passThreshold: latestAttempt.passThreshold,
             activityWatchedMinutes: enrollment.watchedMinutes,
@@ -437,17 +482,21 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
         const now = new Date().toISOString()
         const existing = prev.users.find((user) => user.email.toLowerCase() === invite.email.toLowerCase())
 
-        const user: User =
-          existing ??
-          {
-            id: createId('u'),
-            name: invite.email.split('@')[0] ?? invite.email,
-            email: invite.email,
-            role: invite.role,
-            status: 'active',
-            invitedAt: invite.createdAt,
-            joinedAt: now,
-          }
+        const user: User = existing
+          ? {
+              ...existing,
+              accessScope: existing.accessScope ?? accessScopeFromEmail(existing.email),
+            }
+          : {
+              id: createId('u'),
+              name: invite.email.split('@')[0] ?? invite.email,
+              email: invite.email,
+              role: invite.role,
+              accessScope: accessScopeFromEmail(invite.email),
+              status: 'active',
+              invitedAt: invite.createdAt,
+              joinedAt: now,
+            }
 
         result = { ok: true, user }
         setCurrentUserId(user.id)
@@ -457,7 +506,9 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
           invites: prev.invites.map((entry) =>
             entry.id === invite.id ? { ...entry, status: 'accepted', acceptedAt: now } : entry,
           ),
-          users: existing ? prev.users : [...prev.users, user],
+          users: existing
+            ? prev.users.map((u) => (u.id === existing.id ? user : u))
+            : [...prev.users, user],
         }
       })
 
@@ -489,6 +540,12 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       if (course.status !== 'published' && currentUser.role === 'learner') {
         return { ok: false, message: 'Course is not published.' }
       }
+      if (currentUser.role === 'learner' && !learnerCanAccessCourse(currentUser, course)) {
+        return {
+          ok: false,
+          message: 'This course is available to Treewalk team members only.',
+        }
+      }
 
       const existing = getActiveEnrollment(currentUser.id, courseId)
       if (existing) return { ok: true }
@@ -517,6 +574,9 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
 
       const enrollment = getActiveEnrollment(currentUser.id, courseId)
       if (!enrollment) return { ok: false, message: 'Enroll first.' }
+      if (currentUser.role === 'learner' && !learnerCanAccessCourse(currentUser, course)) {
+        return { ok: false, message: 'This course is available to Treewalk team members only.' }
+      }
 
       const nowIso = new Date().toISOString()
       const boundedPosition = Math.max(0, Math.round(update.positionSecond || 0))
@@ -653,6 +713,9 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
 
       const enrollment = getActiveEnrollment(currentUser.id, courseId)
       if (!enrollment) return null
+      if (currentUser.role === 'learner' && !learnerCanAccessCourse(currentUser, course)) {
+        return null
+      }
       const watchedPercent = getWatchedPercentFromEnrollment(course, enrollment)
       if (watchedPercent < 100) return null
 
@@ -805,15 +868,17 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
 
       const now = new Date().toISOString()
       const totalMinutes = Math.max(1, Math.round(input.videoMinutes ?? 15))
+      const courseId = createId('crs')
 
       const course: Course = {
-        id: createId('crs'),
+        id: courseId,
         title,
         summary: input.summary.trim() || 'New course',
         description: input.description.trim() || input.summary.trim() || title,
         category: input.category.trim() || 'General',
         topic: input.topic,
         level: input.level,
+        audience: normalizeCourseAudience(input.audience),
         instructorId:
           currentUser.role === 'instructor'
             ? currentUser.id
@@ -826,6 +891,13 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
         updatedAt: now,
         muxStatus: 'idle',
         transcriptStatus: 'idle',
+        packageProfile: {
+          schemaVersion: COURSE_PACKAGE_SCHEMA_VERSION,
+          locale: DEFAULT_EXPORT_LOCALE,
+          runtimeMode: 'single_sco',
+          mediaDelivery: 'stream',
+          manifestIdentifier: courseId,
+        },
         quiz: input.quiz ?? [],
         quizPolicy: buildQuizPolicy(totalMinutes),
       }
@@ -874,6 +946,7 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
         category: next.category,
         topic: next.topic,
         level: next.level,
+        audience: next.audience,
         instructorId: nextInstructorId,
         updatedAt: now,
       }
@@ -895,7 +968,7 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
   )
 
   const deleteDraftCourse = useCallback(
-    async (courseId: string): Promise<ActionResult> => {
+    async (courseId: string, options?: { clerkSessionToken?: string | null }): Promise<ActionResult> => {
       if (!currentUser || !currentUserRole) {
         return { ok: false, message: 'Please sign in.' }
       }
@@ -909,8 +982,30 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
         return { ok: false, message: 'You do not have permission to delete this course.' }
       }
 
-      const sb = getSupabaseBrowserClient()
-      if (sb) {
+      const muxAssetId = course.muxAssetId?.trim()
+      if (muxAssetId && getClerkPublishableKey() && isMuxFunctionConfigured()) {
+        const clerkToken = options?.clerkSessionToken?.trim()
+        if (!clerkToken) {
+          return {
+            ok: false,
+            message:
+              'This draft has hosted video. Stay signed in with Clerk, then try again so Mux can delete the file and free your quota.',
+          }
+        }
+        try {
+          await deleteMuxAsset({
+            assetId: muxAssetId,
+            courseId: course.id,
+            clerkSessionToken: clerkToken,
+          })
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : 'Could not delete video from Mux.'
+          setCoursesSyncMessage(msg)
+          return { ok: false, message: msg }
+        }
+      }
+
+      if (hasSupabaseBrowserEnv()) {
         const remote = await deleteCourseFromSupabase(courseId)
         if (!remote.ok) {
           setCoursesSyncMessage(`Could not delete this course: ${remote.message}`)
@@ -928,6 +1023,7 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       setState((prev) => ({
         ...prev,
         courses: prev.courses.filter((c) => c.id !== courseId),
+        removedCatalogCourseIds: [...new Set([...prev.removedCatalogCourseIds, courseId])],
       }))
       return { ok: true }
     },
@@ -1075,6 +1171,7 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       currentUserRole,
       ...state,
       setCurrentUser: setCurrentUserId,
+      syncAuthUser,
       issueInvite,
       inviteUser,
       acceptInvite,
@@ -1107,6 +1204,7 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       currentUserId,
       currentUser,
       currentUserRole,
+      syncAuthUser,
       issueInvite,
       inviteUser,
       acceptInvite,

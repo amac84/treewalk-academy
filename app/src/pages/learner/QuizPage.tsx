@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useAppStore } from '../../hooks/useAppStore'
+import { learnerCanAccessCourse } from '../../lib/courseAccess'
 import { getLatestPassedAttempt, getWatchedPercentFromEnrollment, toDateLabel } from '../../lib/courseLogic'
+import { quizOptionBody } from '../../lib/quizOptionLabel'
 import { ensureQuizPolicy, selectAttemptQuestions } from '../../lib/quizPolicy'
 import type { QuizAttempt } from '../../types'
 
 export function QuizPage() {
   const { courseId = '' } = useParams()
-  const { currentUserId, courses, getActiveEnrollment, submitQuizAttempt } = useAppStore()
+  const { currentUserId, currentUser, courses, getActiveEnrollment, submitQuizAttempt } = useAppStore()
   const course = courses.find((entry) => entry.id === courseId)
   const enrollment = getActiveEnrollment(currentUserId, courseId)
   const policy = course ? ensureQuizPolicy(course) : null
@@ -73,6 +75,16 @@ export function QuizPage() {
     )
   }
 
+  if (currentUser?.role === 'learner' && !learnerCanAccessCourse(currentUser, course)) {
+    return (
+      <section className="empty-state">
+        <h1>Assessment unavailable</h1>
+        <p className="muted">This course is for Treewalk team members only.</p>
+        <Link to="/courses">Back to courses</Link>
+      </section>
+    )
+  }
+
   if (watchedPercent < 100) {
     return (
       <section className="page-stack quiz-page">
@@ -120,7 +132,7 @@ export function QuizPage() {
           <p className="eyebrow">Quiz complete</p>
           <h2>Passed with {passedAttempt.scorePercent}%</h2>
           <p className="muted">
-            Submitted on {toDateLabel(passedAttempt.submittedAt)}. You can revisit this quiz any time.
+            Submitted on {toDateLabel(passedAttempt.submittedAt)} — you can revisit this quiz any time.
           </p>
           <div className="button-row">
             <Link className="btn-primary" to={`/courses/${course.id}`}>
@@ -165,7 +177,7 @@ export function QuizPage() {
                 }
               >
                 <span className="option-choice">{`${String.fromCharCode(97 + optionIndex)})`}</span>
-                <span>{option.label}</span>
+                <span>{quizOptionBody(option.label)}</span>
               </button>
             ))}
           </div>

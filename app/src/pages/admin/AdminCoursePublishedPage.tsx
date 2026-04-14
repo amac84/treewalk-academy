@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { JourneyTaskFooter } from '../../components/common/JourneyTaskFooter'
+import { COURSE_AUDIENCE_LABELS } from '../../constants'
 import { COURSE_STATUS_LABELS, getCourseHours, useCourseWorkflowScope } from './courseWorkflow'
 
 export function AdminCoursePublishedPage() {
@@ -40,8 +41,8 @@ export function AdminCoursePublishedPage() {
 
               <p className="section-copy">{course.summary}</p>
               <p className="meta-line">
-                {course.topic} · {course.level} · 1 video · {course.videoMinutes} min ·{' '}
-                {getCourseHours(course).toFixed(2)} CPD
+                {course.topic} · {course.level} · {COURSE_AUDIENCE_LABELS[course.audience]} · 1 video ·{' '}
+                {course.videoMinutes} min · {getCourseHours(course).toFixed(2)} CPD
               </p>
 
               <div className="button-row">

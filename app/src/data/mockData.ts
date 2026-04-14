@@ -1,12 +1,10 @@
 /**
- * MOCK DATA — synthetic seed content for development and demos only.
+ * MOCK DATA — synthetic users / invites / webinars for local demos only.
  *
- * Nothing here is production user or course data. The app boots from
- * `mockInitialState`; Supabase may copy `mockInitialState.courses`
- * into `academy_courses` when that table is empty.
+ * Course catalog seeds were removed; real courses come from Supabase (`academy_courses`).
+ * When that table is empty, nothing is auto-seeded from here.
  */
 
-import { calculateCPDHours } from '../lib/cpd'
 import type {
   AppState,
   Course,
@@ -34,6 +32,7 @@ const mockUsers: User[] = [
     name: 'Alex Chen, CPA',
     email: 'alex.chen@treewalk.test',
     role: 'learner',
+    accessScope: 'internal',
     status: 'active',
     invitedAt: isoDaysAgo(35),
     joinedAt: isoDaysAgo(34),
@@ -43,6 +42,7 @@ const mockUsers: User[] = [
     name: 'Priya Singh, CPA',
     email: 'priya.singh@treewalk.test',
     role: 'learner',
+    accessScope: 'internal',
     status: 'active',
     invitedAt: isoDaysAgo(21),
     joinedAt: isoDaysAgo(19),
@@ -52,6 +52,7 @@ const mockUsers: User[] = [
     name: 'Jordan Williams, CPA',
     email: 'jordan.williams@treewalk.test',
     role: 'instructor',
+    accessScope: 'internal',
     status: 'active',
     invitedAt: isoDaysAgo(90),
     joinedAt: isoDaysAgo(88),
@@ -61,6 +62,7 @@ const mockUsers: User[] = [
     name: 'Sam Rivera',
     email: 'sam.rivera@treewalk.test',
     role: 'content_admin',
+    accessScope: 'internal',
     status: 'active',
     invitedAt: isoDaysAgo(100),
     joinedAt: isoDaysAgo(98),
@@ -70,6 +72,7 @@ const mockUsers: User[] = [
     name: 'Morgan Lee',
     email: 'morgan.lee@treewalk.test',
     role: 'hr_admin',
+    accessScope: 'internal',
     status: 'active',
     invitedAt: isoDaysAgo(100),
     joinedAt: isoDaysAgo(98),
@@ -79,9 +82,20 @@ const mockUsers: User[] = [
     name: 'Taylor Brooks',
     email: 'taylor.brooks@treewalk.test',
     role: 'super_admin',
+    accessScope: 'internal',
     status: 'active',
     invitedAt: isoDaysAgo(120),
     joinedAt: isoDaysAgo(118),
+  },
+  {
+    id: 'u-external-learner',
+    name: 'Jamie Guest',
+    email: 'jamie.guest@example.com',
+    role: 'learner',
+    accessScope: 'external',
+    status: 'active',
+    invitedAt: isoDaysAgo(5),
+    joinedAt: isoDaysAgo(4),
   },
 ]
 
@@ -97,181 +111,9 @@ const mockInvites: Invite[] = [
   },
 ]
 
-const mockCourses: Course[] = [
-  {
-    id: 'course-ethics-2026',
-    title: 'Ethics in Public Practice 2026',
-    summary: 'Defensible ethics decisions in high-risk accounting scenarios.',
-    description:
-      'A practical ethics refresher focused on high-risk decision points and defensible documentation.',
-    category: 'Ethics',
-    topic: 'Ethics',
-    level: 'intermediate',
-    instructorId: 'u-instructor-1',
-    status: 'published',
-    videoMinutes: 96,
-    muxStatus: 'idle',
-    transcriptStatus: 'idle',
-    quiz: [
-      {
-        id: 'q-ethics-1',
-        prompt: 'Which step best supports defensible professional judgment?',
-        options: [
-          { id: 'a', label: 'Relying on prior year treatment only', isCorrect: false },
-          { id: 'b', label: 'Documenting alternatives and rationale', isCorrect: true },
-          { id: 'c', label: 'Prioritizing client preference over evidence', isCorrect: false },
-          { id: 'd', label: 'Accepting material uncertainty without disclosure', isCorrect: false },
-        ],
-      },
-      {
-        id: 'q-ethics-2',
-        prompt: 'Which safeguard is strongest for independence threats?',
-        options: [
-          { id: 'a', label: 'No safeguard if workload is high', isCorrect: false },
-          { id: 'b', label: 'Independent review and documented approvals', isCorrect: true },
-          { id: 'c', label: 'Verbal acknowledgement only', isCorrect: false },
-          { id: 'd', label: 'Relying only on informal peer feedback', isCorrect: false },
-        ],
-      },
-    ],
-    version: 1,
-    createdAt: isoDaysAgo(42),
-    updatedAt: isoDaysAgo(3),
-    publishedAt: isoDaysAgo(16),
-  },
-  {
-    id: 'course-tax-updates',
-    title: 'Tax Update Intensive: 2026 Q1',
-    summary: 'Regulatory updates with practical filing and advisory impact.',
-    description:
-      'A concise breakdown of regulatory updates and practical impact on filings and advisory.',
-    category: 'Tax',
-    topic: 'Tax',
-    level: 'advanced',
-    instructorId: 'u-instructor-1',
-    status: 'published',
-    videoMinutes: 72,
-    muxStatus: 'idle',
-    transcriptStatus: 'idle',
-    quiz: [
-      {
-        id: 'q-tax-1',
-        prompt: 'What is the best first action after material tax change?',
-        options: [
-          { id: 'a', label: 'Update client advisory notes and filing playbooks', isCorrect: true },
-          { id: 'b', label: 'Delay updates to next quarter', isCorrect: false },
-          { id: 'c', label: 'Communicate informally with no tracking', isCorrect: false },
-          { id: 'd', label: 'Wait until audit comments are finalized', isCorrect: false },
-        ],
-      },
-    ],
-    version: 1,
-    createdAt: isoDaysAgo(30),
-    updatedAt: isoDaysAgo(2),
-    publishedAt: isoDaysAgo(9),
-  },
-  {
-    id: 'course-ai-controls',
-    title: 'AI Controls & Governance for CPA Teams',
-    summary: 'Control design and evidence patterns for AI-assisted operations.',
-    description:
-      'Control design, oversight models, and documentation standards for AI-enabled accounting operations.',
-    category: 'Technology',
-    topic: 'Technology',
-    level: 'beginner',
-    instructorId: 'u-instructor-1',
-    status: 'review',
-    videoMinutes: 58,
-    muxStatus: 'idle',
-    transcriptStatus: 'idle',
-    quiz: [
-      {
-        id: 'q-ai-1',
-        prompt: 'Which control objective is foundational?',
-        options: [
-          { id: 'a', label: 'Undefined accountability', isCorrect: false },
-          { id: 'b', label: 'Traceable decisions and oversight', isCorrect: true },
-          { id: 'c', label: 'No monitoring baseline', isCorrect: false },
-          { id: 'd', label: 'Model access with no role controls', isCorrect: false },
-        ],
-      },
-    ],
-    version: 1,
-    createdAt: isoDaysAgo(26),
-    updatedAt: isoDaysAgo(1),
-  },
-  {
-    id: 'course-advisory-narratives',
-    title: 'Advisory Storytelling for CFO Conversations',
-    summary: 'CFO-facing communication patterns for actionable insight.',
-    description:
-      'How to present financial insight clearly, credibly, and actionably to executive audiences.',
-    category: 'Advisory',
-    topic: 'Leadership',
-    level: 'intermediate',
-    instructorId: 'u-instructor-1',
-    status: 'draft',
-    videoMinutes: 44,
-    muxStatus: 'idle',
-    transcriptStatus: 'idle',
-    quiz: [
-      {
-        id: 'q-adv-1',
-        prompt: 'Strong advisory communication should end with:',
-        options: [
-          { id: 'a', label: 'an explicit recommendation and next step', isCorrect: true },
-          { id: 'b', label: 'a broad summary only', isCorrect: false },
-          { id: 'c', label: 'raw data with no interpretation', isCorrect: false },
-          { id: 'd', label: 'multiple disconnected insights with no priority', isCorrect: false },
-        ],
-      },
-    ],
-    version: 1,
-    createdAt: isoDaysAgo(20),
-    updatedAt: isoDaysAgo(1),
-  },
-]
+const mockCourses: Course[] = []
 
-const mockEnrollments: Enrollment[] = [
-  {
-    id: 'enr-1',
-    userId: 'u-learner-1',
-    courseId: 'course-ethics-2026',
-    enrolledAt: isoDaysAgo(14),
-    watchedMinutes: 54,
-    videoProgress: {
-      durationSeconds: 5760,
-      watchedSeconds: 3240,
-      furthestSecond: 3240,
-      lastPositionSecond: 3240,
-      completed: false,
-      pausedCount: 2,
-      resumedCount: 2,
-      seekViolations: 0,
-    },
-    quizAttempts: [],
-  },
-  {
-    id: 'enr-2',
-    userId: 'u-learner-2',
-    courseId: 'course-tax-updates',
-    enrolledAt: isoDaysAgo(11),
-    completedAt: isoDaysAgo(7),
-    certificateId: 'cert-u-learner-2-course-tax-updates',
-    watchedMinutes: 72,
-    videoProgress: {
-      durationSeconds: 4320,
-      watchedSeconds: 4320,
-      furthestSecond: 4320,
-      lastPositionSecond: 4320,
-      completed: true,
-      pausedCount: 1,
-      resumedCount: 1,
-      seekViolations: 0,
-    },
-    quizAttempts: [],
-  },
-]
+const mockEnrollments: Enrollment[] = []
 
 const mockWebinars: Webinar[] = [
   {
@@ -293,7 +135,7 @@ const mockWebinars: Webinar[] = [
     startAt: isoDaysAgo(370),
     teamsJoinUrl: 'https://teams.microsoft.com/l/meetup-join/treewalk-close',
     status: 'completed',
-    convertedCourseId: 'course-tax-updates',
+    convertedCourseId: null,
     attendeeIds: ['u-learner-2'],
     provider: 'Microsoft Teams',
     externalEventId: 'tw-yec-2025',
@@ -304,35 +146,11 @@ export const mockInitialState: AppState = {
   users: mockUsers,
   invites: mockInvites,
   courses: mockCourses,
+  removedCatalogCourseIds: [],
   enrollments: mockEnrollments,
   progress: {},
-  completions: [
-    {
-      id: 'comp-1',
-      userId: 'u-learner-2',
-      courseId: 'course-tax-updates',
-      completionDate: isoDaysAgo(7),
-      cpdHours: calculateCPDHours(72),
-      quizAttemptId: 'seed-pass-1',
-      certificateId: 'cert-u-learner-2-course-tax-updates',
-      courseVersion: 1,
-    },
-  ],
-  certificates: [
-    {
-      id: 'cert-u-learner-2-course-tax-updates',
-      userId: 'u-learner-2',
-      courseId: 'course-tax-updates',
-      verificationCode: 'TW-CERT-8821',
-      issuedAt: isoDaysAgo(7),
-      providerName: 'Treewalk Academy',
-      courseTitle: 'Tax Update Intensive: 2026 Q1',
-      durationHours: calculateCPDHours(72),
-      completionDate: isoDaysAgo(7),
-      quizAttemptId: 'seed-pass-1',
-      passThreshold: 80,
-    },
-  ],
+  completions: [],
+  certificates: [],
   webinars: mockWebinars,
   webinarAttendances: [
     {
@@ -348,33 +166,9 @@ export const mockInitialState: AppState = {
       attendedAt: isoDaysAgo(370),
     },
   ],
-  cpdLedger: [
-    {
-      id: 'cpd-1',
-      userId: 'u-learner-2',
-      courseId: 'course-tax-updates',
-      completionId: 'comp-1',
-      hoursAwarded: calculateCPDHours(72),
-      createdAt: isoDaysAgo(7),
-    },
-  ],
+  cpdLedger: [],
   auditEvents: [],
-  transcript: [
-    {
-      id: 'tr-1',
-      userId: 'u-learner-2',
-      courseId: 'course-tax-updates',
-      courseTitle: 'Tax Update Intensive: 2026 Q1',
-      completedAt: isoDaysAgo(7),
-      cpdHours: calculateCPDHours(72),
-      certificateId: 'cert-u-learner-2-course-tax-updates',
-      verificationCode: 'TW-CERT-8821',
-      providerName: 'Treewalk Academy',
-      quizAttemptId: 'seed-pass-1',
-      passThreshold: 80,
-      activityWatchedMinutes: 72,
-    },
-  ],
+  transcript: [],
   learningActivityLog: [],
 }
 

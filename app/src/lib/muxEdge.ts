@@ -4,12 +4,15 @@ import {
   type ExtractAudioProgress,
 } from './extractAudioForTranscription'
 import { ensureMuxSupabaseAccessToken } from './supabaseMuxSession'
+import { hasSupabaseBrowserEnv } from './supabaseClient'
 import {
+  COURSE_TRANSCRIPT_DOWNLOAD_VERSION,
   createStructuredTranscriptFromText,
   getTranscriptPlainText,
   normalizeTranscriptCues,
 } from './transcript'
 import type { SegmentTranscriptData } from '../types'
+import { getAppSettings } from './appSettings'
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -37,9 +40,9 @@ async function prepareFileForTranscription(
   return extractAudioFromVideoForTranscription(file, { onProgress: onExtractProgress })
 }
 
-/** Same Supabase project as `VITE_FEEDBACK_FUNCTION_URL` when that URL targets *.supabase.co. */
+/** Same Supabase project as `feedbackFunctionUrl` when that URL targets *.supabase.co. */
 function supabaseApiOriginFromFeedbackUrl(): string | null {
-  const raw = import.meta.env.VITE_FEEDBACK_FUNCTION_URL?.trim()
+  const raw = getAppSettings().feedbackFunctionUrl
   if (!raw || !/^https?:\/\//i.test(raw)) return null
   try {
     const u = new URL(raw)
@@ -52,9 +55,10 @@ function supabaseApiOriginFromFeedbackUrl(): string | null {
 
 /** Resolves the video Edge Function URL: explicit env wins, else same Supabase project as URL envs. */
 function resolvedMuxFunctionUrl(): string | null {
-  const explicit = import.meta.env.VITE_MUX_FUNCTION_URL?.trim()
+  const settings = getAppSettings()
+  const explicit = settings.muxFunctionUrl
   if (explicit) return explicit
-  const base = import.meta.env.VITE_SUPABASE_URL?.trim()
+  const base = settings.supabaseUrl
   if (base) {
     return `${base.replace(/\/$/, '')}/functions/v1/mux`
   }
@@ -67,7 +71,7 @@ function resolvedMuxFunctionUrl(): string | null {
 
 /** True when the SPA can call the video upload Edge Function (direct upload + transcription). */
 export function isMuxFunctionConfigured(): boolean {
-  return Boolean(resolvedMuxFunctionUrl())
+  return Boolean(resolvedMuxFunctionUrl() && hasSupabaseBrowserEnv())
 }
 
 function muxFunctionUrl(): string {
@@ -75,7 +79,7 @@ function muxFunctionUrl(): string {
   if (!url) {
     throw new Error(
       import.meta.env.DEV
-        ? 'Add VITE_SUPABASE_URL (and deploy the mux function) or set VITE_MUX_FUNCTION_URL in app/.env, then restart npm run dev.'
+        ? 'Add supabaseUrl (or muxFunctionUrl) to app/public/app-settings.json, then restart npm run dev.'
         : 'Video upload is not configured for this site.',
     )
   }
@@ -84,7 +88,7 @@ function muxFunctionUrl(): string {
 
 async function authHeaders(): Promise<Headers> {
   const headers = new Headers()
-  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim()
+  const anonKey = getAppSettings().supabaseAnonKey
   if (anonKey) {
     headers.set('apikey', anonKey)
     headers.set('X-Client-Info', 'treewalk-academy-mux')
@@ -103,13 +107,63 @@ async function jsonHeadersWithAuth(): Promise<Headers> {
   return headers
 }
 
+function looksLikeHtmlBody(text: string): boolean {
+  return /^\s*</.test(text)
+}
+
+/** Read JSON POST response; on errors, prefer server `error` / `message` or a clear status hint. */
+function muxWireErrorToString(raw: unknown): string {
+  if (typeof raw === 'string' && raw.trim()) return raw.trim()
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const o = raw as Record<string, unknown>
+    if (typeof o.message === 'string' && o.message.trim()) return o.message.trim()
+    const msgs = o.messages
+    if (Array.isArray(msgs)) {
+      const text = msgs.filter((m): m is string => typeof m === 'string' && m.trim()).join(' ')
+      if (text.trim()) return text.trim()
+    }
+    if (typeof o.type === 'string' && o.type.trim()) return o.type.trim()
+  }
+  return ''
+}
+
+function messageFromMuxJsonResponse(
+  status: number,
+  json: Record<string, unknown> | null,
+  rawText: string,
+): string {
+  const err =
+    muxWireErrorToString(json?.error) ||
+    (typeof json?.message === 'string' && json.message.trim()) ||
+    ''
+  if (err) return err
+
+  if (status === 502 || status === 503 || status === 504) {
+    return (
+      'The video service did not respond in time or returned an error. Wait a moment and try again. ' +
+      'If this keeps happening, confirm the mux Edge Function is deployed and Mux credentials (MUX_TOKEN_ID / MUX_TOKEN_SECRET) are set in Supabase secrets, then check Supabase → Edge Functions → mux logs.'
+    )
+  }
+
+  const trimmed = rawText.trim()
+  if (trimmed && trimmed.length < 500 && !looksLikeHtmlBody(trimmed)) {
+    return trimmed
+  }
+  return `Video service error (${status})`
+}
+
 export async function muxEdgePost(body: Record<string, unknown>): Promise<Record<string, unknown>> {
   const headers = await jsonHeadersWithAuth()
   if (!headers.get('Authorization')) {
+    const missingAnon = !hasSupabaseBrowserEnv()
     throw new Error(
       import.meta.env.DEV
-        ? 'Video upload needs a Supabase user JWT. For seeded demo roles: enable Anonymous sign-in (Supabase Auth → Providers), set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY, then reload. (Advanced: MUX_ALLOW_UNAUTHENTICATED on a private dev backend only.)'
-        : 'You must be signed in to upload or process video. If you use demo or invite logins, enable Anonymous sign-in in Supabase and redeploy unless VITE_SUPABASE_MUX_ANON_FALLBACK=false.',
+        ? missingAnon
+          ? 'Video upload needs supabaseUrl or feedbackFunctionUrl plus supabaseAnonKey in app/public/app-settings.json. Anonymous sign-in must be enabled in Supabase for seeded demo roles.'
+          : 'Video upload needs a Supabase user JWT. Enable Anonymous sign-in (Supabase Auth → Providers), then reload. (Advanced: MUX_ALLOW_UNAUTHENTICATED on a private dev backend only.)'
+        : missingAnon
+          ? 'Video upload is missing the public Supabase settings for this deployment. Add them to the app settings file, redeploy, then try again.'
+          : 'You must be signed in to upload or process video. Anonymous sign-in is enabled in Supabase but no JWT was created — set supabaseMuxAnonFallback to false only for strict real-auth deploys; otherwise check the browser console.',
     )
   }
 
@@ -119,15 +173,87 @@ export async function muxEdgePost(body: Record<string, unknown>): Promise<Record
     body: JSON.stringify(body),
   })
 
-  const json = (await response.json().catch(() => null)) as Record<string, unknown> | null
+  const rawText = await response.text()
+  let json: Record<string, unknown> | null = null
+  if (rawText) {
+    try {
+      const parsed = JSON.parse(rawText) as unknown
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        json = parsed as Record<string, unknown>
+      }
+    } catch {
+      /* non-JSON body (e.g. gateway HTML) */
+    }
+  }
+
   if (!response.ok) {
-    const msg =
-      (typeof json?.error === 'string' && json.error) ||
-      (json?.ok === false && typeof json.error === 'string' && json.error) ||
-      `Video service error (${response.status})`
-    throw new Error(msg)
+    throw new Error(messageFromMuxJsonResponse(response.status, json, rawText))
   }
   return json ?? {}
+}
+
+/**
+ * Permanently deletes a Mux asset (frees hosted quota). Requires Clerk session JWT on the Edge function
+ * (`CLERK_SECRET_KEY` + `X-Clerk-Session-Token`); content_admin / super_admin may delete any asset;
+ * instructors must pass `courseId` and own the course in `academy_courses`.
+ */
+export async function deleteMuxAsset(options: {
+  assetId: string
+  courseId?: string
+  clerkSessionToken: string
+}): Promise<void> {
+  const token = options.clerkSessionToken.trim()
+  if (!token) {
+    throw new Error('Clerk session is required to delete video from Mux.')
+  }
+  const headers = await jsonHeadersWithAuth()
+  if (!headers.get('Authorization')) {
+    const missingAnon = !hasSupabaseBrowserEnv()
+    throw new Error(
+      missingAnon
+        ? 'Video service needs Supabase settings and a user session before Mux delete.'
+        : 'Video service needs a Supabase user JWT before Mux delete.',
+    )
+  }
+  headers.set('X-Clerk-Session-Token', token)
+
+  const body: Record<string, unknown> = {
+    action: 'delete_mux_asset',
+    asset_id: options.assetId.trim(),
+  }
+  if (options.courseId?.trim()) {
+    body.course_id = options.courseId.trim()
+  }
+
+  const response = await fetch(muxFunctionUrl(), {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  })
+
+  const rawText = await response.text()
+  let json: Record<string, unknown> | null = null
+  if (rawText) {
+    try {
+      const parsed = JSON.parse(rawText) as unknown
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        json = parsed as Record<string, unknown>
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (!response.ok) {
+    throw new Error(messageFromMuxJsonResponse(response.status, json, rawText))
+  }
+  if (json?.ok !== true) {
+    const msg =
+      muxWireErrorToString(json?.error) ||
+      (typeof json?.message === 'string' && json.message.trim()) ||
+      'Mux did not confirm deletion.'
+    throw new Error(msg)
+  }
 }
 
 export async function createMuxDirectUpload(corsOrigin: string): Promise<{ uploadId: string; uploadUrl: string }> {
@@ -259,7 +385,7 @@ function parseStructuredTranscriptFromResponse(
       downloadVersion:
         typeof typed.downloadVersion === 'number' && Number.isFinite(typed.downloadVersion)
           ? typed.downloadVersion
-          : normalized.downloadVersion,
+          : COURSE_TRANSCRIPT_DOWNLOAD_VERSION,
     }
   }
   return createStructuredTranscriptFromText({
@@ -289,13 +415,13 @@ export async function transcribeVideoFile(
     throw new Error(
       import.meta.env.DEV
         ? 'Transcription needs a Supabase user JWT. Enable Anonymous sign-in in Supabase for local demo roles, or use a real account.'
-        : 'You must be signed in to run transcription. Enable Anonymous sign-in in Supabase for demo/invite pilots unless VITE_SUPABASE_MUX_ANON_FALLBACK=false.',
+        : 'You must be signed in to run transcription. Enable Anonymous sign-in in Supabase for demo/invite pilots unless supabaseMuxAnonFallback is false.',
     )
   }
   const form = new FormData()
   form.append('action', 'transcribe_file')
   form.append('file', prepared, prepared.name)
-  const model = import.meta.env.VITE_OPENAI_TRANSCRIBE_MODEL?.trim()
+  const model = getAppSettings().openAiTranscribeModel
   if (model) {
     form.append('model', model)
   }
@@ -380,6 +506,7 @@ function parseDraftedQuizQuestions(raw: unknown): DraftedQuizQuestion[] {
       const options = Array.isArray(typed.options)
         ? typed.options.map((item) => (typeof item === 'string' ? item.trim() : ''))
         : []
+      // Accept both legacy and current wire keys to stay compatible with Edge function updates.
       const rawCorrectOption =
         typeof typed.correctOption === 'string'
           ? typed.correctOption
