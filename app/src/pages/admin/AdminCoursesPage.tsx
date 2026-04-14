@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { CatalogSyncCallout } from '../../components/common/CatalogSyncCallout'
 import { COURSE_STATUS_LABELS, ORDERED_STATUSES, useCourseWorkflowScope } from './courseWorkflow'
 
 export function AdminCoursesPage() {
@@ -10,6 +11,7 @@ export function AdminCoursesPage() {
 
   return (
     <section className="page page-admin page-admin-courses">
+      <CatalogSyncCallout variant="admin" />
       <header className="page-header page-header--compact">
         <p className="section-eyebrow">Admin · Course workflow</p>
         <h1>Course workflow overview</h1>

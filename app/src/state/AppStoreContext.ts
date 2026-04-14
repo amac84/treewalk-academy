@@ -83,8 +83,12 @@ export interface AppStoreContextValue extends AppState {
   syncAuthUser: (user: User | null) => void
   issueInvite: (email: string, role: UserRole) => Invite
   inviteUser: (email: string, fullName: string, role: UserRole) => Invite
+  /** Removes a pending invite so its code can no longer be used. */
+  deletePendingInvite: (inviteId: string) => void
   acceptInvite: (code: string) => { ok: true; user: User } | { ok: false; error: string }
   suspendUser: (userId: string, suspended?: boolean) => void
+  /** Removes the user from the local roster and clears their learner runtime in this workspace (demo / app state). */
+  deleteUser: (userId: string) => void
   enrollInCourse: (courseId: string) => ActionResult
   markVideoWatched: (courseId: string) => ActionResult
   recordVideoPlayback: (courseId: string, update: VideoPlaybackUpdateInput) => ActionResult
