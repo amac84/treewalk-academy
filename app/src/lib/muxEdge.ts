@@ -119,7 +119,9 @@ function muxWireErrorToString(raw: unknown): string {
     if (typeof o.message === 'string' && o.message.trim()) return o.message.trim()
     const msgs = o.messages
     if (Array.isArray(msgs)) {
-      const text = msgs.filter((m): m is string => typeof m === 'string' && m.trim()).join(' ')
+      const text = msgs
+        .filter((m): m is string => typeof m === 'string' && m.trim().length > 0)
+        .join(' ')
       if (text.trim()) return text.trim()
     }
     if (typeof o.type === 'string' && o.type.trim()) return o.type.trim()
