@@ -10,7 +10,7 @@ export function AdminReportSnapshotPage() {
         <p className="section-eyebrow">Admin · Reporting</p>
         <h1>Operational snapshot</h1>
         <p className="page-subtitle">
-          This page has one objective: provide a top-level KPI snapshot for usage, compliance, and webinar
+          This page has one objective: provide a top-level KPI snapshot for usage, compliance, and live-session
           pipeline health.
         </p>
       </header>
@@ -64,13 +64,13 @@ export function AdminReportSnapshotPage() {
 
         <article className="admin-snapshot">
           <div className="admin-snapshot__lead">
-            <p className="section-eyebrow">Webinars</p>
+            <p className="section-eyebrow">Live sessions</p>
             <h2>Live pipeline</h2>
           </div>
           <dl className="admin-definition-list">
             <div>
-              <dt>Total webinars</dt>
-              <dd>{snapshot.totalWebinars}</dd>
+              <dt>Total occurrences</dt>
+              <dd>{snapshot.totalLiveOccurrences}</dd>
             </div>
             <div>
               <dt>Attendance records</dt>
@@ -78,7 +78,7 @@ export function AdminReportSnapshotPage() {
             </div>
             <div>
               <dt>Converted to courses</dt>
-              <dd>{snapshot.convertedWebinars}</dd>
+              <dd>{snapshot.convertedOccurrences}</dd>
             </div>
           </dl>
         </article>

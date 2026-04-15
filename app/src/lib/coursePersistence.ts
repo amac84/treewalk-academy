@@ -84,9 +84,15 @@ import { describeSupabaseTransportFailure, getSupabaseBrowserClient } from './su
 const TABLE = 'academy_courses'
 /** Special row reserved for learner runtime evidence; all other rows are authored `Course` documents only. */
 const RUNTIME_STATE_ROW_ID = '__academy_runtime_state__'
+/** Reserved internal rows used by backend automation (must never be treated as authored courses). */
+const INTERNAL_ROW_PREFIX = '__academy_'
 
 type Row = { id: string; data: Course }
 type RuntimeRow = { id: string; data: PersistedRuntimeState }
+
+function isInternalAcademyRowId(id: string): boolean {
+  return id.startsWith(INTERNAL_ROW_PREFIX)
+}
 
 export type PersistedRuntimeState = Pick<
   AppState,
@@ -98,6 +104,9 @@ export type PersistedRuntimeState = Pick<
   | 'transcript'
   | 'learningActivityLog'
   | 'learnerProfiles'
+  | 'liveOccurrences'
+  | 'liveOccurrenceAttendances'
+  | 'liveRehearsal'
 > & { removedCatalogCourseIds?: string[] }
 
 export async function persistCourseToSupabase(course: Course): Promise<{ ok: true } | { ok: false; message: string }> {
@@ -191,7 +200,7 @@ export async function loadCoursesFromSupabase(
   }
 
   const list = rows ?? []
-  const courseRows = list.filter((r) => r.id !== RUNTIME_STATE_ROW_ID)
+  const courseRows = list.filter((r) => !isInternalAcademyRowId(r.id) && r.id !== RUNTIME_STATE_ROW_ID)
   if (courseRows.length === 0) {
     const toSeed = seedCourses.filter((c) => !removed.has(c.id))
     await Promise.all(toSeed.map((c) => persistCourseToSupabase(c)))

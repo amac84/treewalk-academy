@@ -77,12 +77,12 @@ export function migrateLearnerRuntimeForClerkLogin(state: AppState, canonical: U
   const nextCpdLedger = state.cpdLedger.map((c) => ({ ...c, userId: rewrite(c.userId) }))
   const nextActivity = state.learningActivityLog.map((e) => ({ ...e, userId: rewrite(e.userId) }))
 
-  const nextWebinars = state.webinars.map((w) => ({
+  const nextLiveOccurrences = state.liveOccurrences.map((w) => ({
     ...w,
     attendeeIds: w.attendeeIds.map((id) => rewrite(id)),
   }))
 
-  const nextWebinarAttendances = state.webinarAttendances.map((wa) => ({
+  const nextLiveOccurrenceAttendances = state.liveOccurrenceAttendances.map((wa) => ({
     ...wa,
     userId: rewrite(wa.userId),
   }))
@@ -129,8 +129,8 @@ export function migrateLearnerRuntimeForClerkLogin(state: AppState, canonical: U
     certificates: nextCertificates,
     cpdLedger: nextCpdLedger,
     learningActivityLog: nextActivity,
-    webinars: nextWebinars,
-    webinarAttendances: nextWebinarAttendances,
+    liveOccurrences: nextLiveOccurrences,
+    liveOccurrenceAttendances: nextLiveOccurrenceAttendances,
     auditEvents: nextAudit,
     progress: nextProgress,
   }

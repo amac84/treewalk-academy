@@ -45,6 +45,14 @@ const AdminReportSnapshotPage = lazy(
   async () => ({ default: (await import('./pages/admin/AdminReportSnapshotPage')).AdminReportSnapshotPage }),
 )
 const AdminInvitesPage = lazy(async () => ({ default: (await import('./pages/admin/AdminInvitesPage')).AdminInvitesPage }))
+const AdminLiveEventsPage = lazy(
+  async () => ({ default: (await import('./pages/admin/AdminLiveEventsPage')).AdminLiveEventsPage }),
+)
+const AdminLivePresenterBroadcastGuidePage = lazy(
+  async () => ({
+    default: (await import('./pages/admin/AdminLivePresenterBroadcastGuidePage')).AdminLivePresenterBroadcastGuidePage,
+  }),
+)
 const AdminReportsPage = lazy(async () => ({ default: (await import('./pages/admin/AdminReportsPage')).AdminReportsPage }))
 const AdminUsersPage = lazy(async () => ({ default: (await import('./pages/admin/AdminUsersPage')).AdminUsersPage }))
 const CourseDetailPage = lazy(async () => ({ default: (await import('./pages/learner/CourseDetailPage')).CourseDetailPage }))
@@ -66,6 +74,9 @@ const WebinarsUpcomingPage = lazy(
   async () => ({ default: (await import('./pages/learner/WebinarsUpcomingPage')).WebinarsUpcomingPage }),
 )
 const WebinarsPage = lazy(async () => ({ default: (await import('./pages/learner/WebinarsPage')).WebinarsPage }))
+const WebinarLivePage = lazy(
+  async () => ({ default: (await import('./pages/learner/WebinarLivePage')).WebinarLivePage }),
+)
 const SignInPage = lazy(async () => ({ default: (await import('./pages/SignInPage')).SignInPage }))
 const SignUpPage = lazy(async () => ({ default: (await import('./pages/SignUpPage')).SignUpPage }))
 const SsoCallbackPage = lazy(async () => ({ default: (await import('./pages/SsoCallbackPage')).SsoCallbackPage }))
@@ -107,6 +118,7 @@ export function AppRouter() {
           <Route path="/webinars" element={<WebinarsPage />} />
           <Route path="/webinars/upcoming" element={<WebinarsUpcomingPage />} />
           <Route path="/webinars/history" element={<WebinarsHistoryPage />} />
+          <Route path="/webinars/:occurrenceId/live" element={<WebinarLivePage />} />
         </Route>
 
         <Route
@@ -134,6 +146,22 @@ export function AppRouter() {
             <Route path="review" element={<AdminCourseReviewPage />} />
             <Route path="published" element={<AdminCoursePublishedPage />} />
           </Route>
+          <Route
+            path="/admin/live-events"
+            element={
+              <RoleGuard allowedRoles={courseAdminRoles}>
+                <AdminLiveEventsPage />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="/admin/live-events/presenter-guide"
+            element={
+              <RoleGuard allowedRoles={courseAdminRoles}>
+                <AdminLivePresenterBroadcastGuidePage />
+              </RoleGuard>
+            }
+          />
           <Route
             path="/admin/invites"
             element={

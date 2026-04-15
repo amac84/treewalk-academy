@@ -14,8 +14,8 @@ const learnerNav: SideNavItem[] = [
   { to: '/courses', label: 'Courses', end: true },
   { to: '/my-learning/transcript', label: 'Transcript', end: true },
   { to: '/my-learning/export', label: 'Export CPD', end: true },
-  { to: '/webinars/upcoming', label: 'Upcoming Webinars', end: true },
-  { to: '/webinars/history', label: 'Webinar History', end: true },
+  { to: '/webinars/upcoming', label: 'Upcoming Live Sessions', end: true },
+  { to: '/webinars/history', label: 'Live Session History', end: true },
 ]
 
 /** Course workflow and catalog management (instructor, content_admin, super_admin). */

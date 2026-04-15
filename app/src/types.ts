@@ -56,6 +56,9 @@ export interface Invite {
   createdByUserId: string
   createdAt: string
   acceptedAt?: string
+  emailDeliveryStatus?: 'pending' | 'sent' | 'failed'
+  emailSentAt?: string
+  emailDeliveryError?: string
 }
 
 export type MuxVideoStatus = 'idle' | 'uploading' | 'processing' | 'ready' | 'error'
@@ -217,6 +220,7 @@ export interface Certificate {
   completionDate: string
   quizAttemptId: string
   passThreshold: number
+  awardMethod?: 'quiz_completion' | 'live_attendance'
 }
 
 export interface Completion {
@@ -228,6 +232,7 @@ export interface Completion {
   quizAttemptId: string
   certificateId: string
   courseVersion: number
+  awardMethod?: 'quiz_completion' | 'live_attendance'
 }
 
 export interface CpdLedgerEntry {
@@ -239,24 +244,62 @@ export interface CpdLedgerEntry {
   createdAt: string
 }
 
-export interface Webinar {
+export type LiveOccurrenceStatus = 'scheduled' | 'live' | 'ended'
+export type LiveOccurrenceConversionStatus =
+  | 'scheduled'
+  | 'live'
+  | 'ended'
+  | 'asset_ready'
+  | 'draft_created'
+  | 'failed'
+
+export interface LiveOccurrence {
   id: string
   title: string
   description: string
   startAt: string
-  teamsJoinUrl: string
-  status: 'upcoming' | 'completed'
-  convertedCourseId?: string | null
-  provider: 'Microsoft Teams'
-  externalEventId: string
+  expectedMinutes: number
+  status: LiveOccurrenceStatus
+  conversionStatus: LiveOccurrenceConversionStatus
+  audience: CourseAudience
+  createdByUserId: string
+  presenterUserIds: string[]
   attendeeIds: string[]
+  muxLiveStreamId?: string
+  muxPlaybackId?: string
+  muxStreamKey?: string
+  muxAssetId?: string
+  resultingCourseId?: string | null
+  muxErrorMessage?: string
 }
 
-export interface WebinarAttendance {
+export interface LiveOccurrenceAttendance {
   id: string
-  webinarId: string
+  occurrenceId: string
   userId: string
   attendedAt: string
+  source: 'live_auto' | 'live_manual' | 'replay'
+  joinedAt?: string
+  lastActiveAt?: string
+  watchedSeconds?: number
+  qualified?: boolean
+  qualifiedAt?: string
+  qualificationReason?:
+    | 'watch_threshold_and_end_presence'
+    | 'watch_below_threshold'
+    | 'not_active_near_end'
+    | 'not_ended'
+    | 'manual_marked'
+}
+
+export interface LiveRehearsalStream {
+  id: string
+  title: string
+  guidance: string
+  muxLiveStreamId?: string
+  muxPlaybackId?: string
+  muxStreamKey?: string
+  updatedAt: string
 }
 
 export interface AuditEvent {
@@ -307,6 +350,7 @@ export interface TranscriptEntry {
   quizAttemptId: string
   passThreshold: number
   activityWatchedMinutes: number
+  awardMethod?: 'quiz_completion' | 'live_attendance'
 }
 
 export interface LearningActivityEvent {
@@ -341,8 +385,9 @@ export interface AppState {
   completions: Completion[]
   certificates: Certificate[]
   cpdLedger: CpdLedgerEntry[]
-  webinars: Webinar[]
-  webinarAttendances: WebinarAttendance[]
+  liveOccurrences: LiveOccurrence[]
+  liveOccurrenceAttendances: LiveOccurrenceAttendance[]
+  liveRehearsal: LiveRehearsalStream | null
   auditEvents: AuditEvent[]
   transcript: TranscriptEntry[]
   learningActivityLog: LearningActivityEvent[]

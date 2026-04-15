@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import {
+  LIVE_ATTENDANCE_HEARTBEAT_MAX_DELTA_SECONDS,
+  LIVE_ATTENDANCE_REQUIRED_WATCH_RATIO,
+} from '../constants'
 import { getCpdProviderName } from '../lib/appSettings'
 import { mockInitialState } from '../data/mockData'
 import {
@@ -9,11 +13,25 @@ import {
   persistCourseToSupabase,
 } from '../lib/coursePersistence'
 import { getCourseCPDHours } from '../lib/cpd'
+import {
+  clampLiveAttendanceHeartbeatDeltaSeconds,
+  evaluateLiveAttendanceQualification,
+  hasCompletionForCourse,
+} from '../lib/liveAttendance'
 import { buildQuizPolicy, ensureQuizPolicy } from '../lib/quizPolicy'
 import { learnerCanAccessCourse } from '../lib/courseAccess'
 import { migrateLearnerRuntimeForClerkLogin, normalizeLearnerProfiles } from '../lib/clerkRuntimeMigration'
 import { getClerkPublishableKey } from '../lib/clerkEnv'
-import { deleteMuxAsset, isMuxFunctionConfigured } from '../lib/muxEdge'
+import { isInviteFunctionConfigured, sendInviteEmailViaEdge } from '../lib/inviteEdge'
+import {
+  createMuxLiveStream,
+  deleteMuxAsset,
+  getMuxAsset,
+  getMuxLiveStream,
+  getOrCreateMuxRehearsalStream,
+  isMuxFunctionConfigured,
+  muxDurationSecondsToMinutes,
+} from '../lib/muxEdge'
 import { getSupabaseBrowserClient, hasSupabaseBrowserEnv } from '../lib/supabaseClient'
 import { syncSupabaseSessionForAuthorRole } from '../lib/supabaseMuxSession'
 import { accessScopeFromEmail } from '../lib/treewalkEmail'
@@ -28,6 +46,7 @@ import type {
   Course,
   CourseAudience,
   CourseLevel,
+  LiveOccurrence,
   CoursesSyncStatus,
   CourseStatus,
   CourseTopic,
@@ -44,6 +63,7 @@ import type {
 import {
   AppStoreContext,
   type AppStoreContextValue,
+  type CreateLiveOccurrenceInput,
   type CreateCourseInput,
   type VideoPlaybackUpdateInput,
   type VideoTranscriptionProgress,
@@ -62,6 +82,21 @@ const createCode = () =>
 const createId = (prefix: string) =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
+function sanitizeLiveDataForRuntime(state: AppState): Pick<AppState, 'liveOccurrences' | 'liveRehearsal'> {
+  return {
+    liveOccurrences: state.liveOccurrences.map((occurrence) => ({
+      ...occurrence,
+      muxStreamKey: undefined,
+    })),
+    liveRehearsal: state.liveRehearsal
+      ? {
+          ...state.liveRehearsal,
+          muxStreamKey: undefined,
+        }
+      : null,
+  }
+}
+
 const toRuntimeState = (state: AppState) => ({
   enrollments: state.enrollments,
   progress: state.progress,
@@ -71,6 +106,8 @@ const toRuntimeState = (state: AppState) => ({
   transcript: state.transcript,
   learningActivityLog: state.learningActivityLog,
   learnerProfiles: state.learnerProfiles,
+  ...sanitizeLiveDataForRuntime(state),
+  liveOccurrenceAttendances: state.liveOccurrenceAttendances,
   removedCatalogCourseIds: state.removedCatalogCourseIds,
 })
 
@@ -81,6 +118,129 @@ function normalizeRemovedCatalogCourseIdsFromRuntime(raw: unknown): string[] {
     if (typeof item === 'string' && item.trim()) out.add(item.trim())
   }
   return [...out]
+}
+
+function normalizeLiveOccurrencesFromRuntime(raw: unknown): AppState['liveOccurrences'] {
+  if (!Array.isArray(raw)) return []
+  const occurrences: LiveOccurrence[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const typed = entry as Record<string, unknown>
+    const id = typeof typed.id === 'string' ? typed.id.trim() : ''
+    const title = typeof typed.title === 'string' ? typed.title.trim() : ''
+    if (!id || !title) continue
+    const statusRaw = typeof typed.status === 'string' ? typed.status : ''
+    const status: LiveOccurrence['status'] =
+      statusRaw === 'live' || statusRaw === 'ended' ? statusRaw : 'scheduled'
+    const conversionRaw = typeof typed.conversionStatus === 'string' ? typed.conversionStatus : ''
+    const conversionStatus: LiveOccurrence['conversionStatus'] =
+      conversionRaw === 'live'
+        || conversionRaw === 'ended'
+        || conversionRaw === 'asset_ready'
+        || conversionRaw === 'draft_created'
+        || conversionRaw === 'failed'
+        ? conversionRaw
+        : 'scheduled'
+    const normalized: LiveOccurrence = {
+      id,
+      title,
+      description: typeof typed.description === 'string' ? typed.description : '',
+      startAt: typeof typed.startAt === 'string' ? typed.startAt : new Date().toISOString(),
+      expectedMinutes:
+        typeof typed.expectedMinutes === 'number' && Number.isFinite(typed.expectedMinutes)
+          ? Math.max(1, Math.round(typed.expectedMinutes))
+          : 60,
+      status,
+      conversionStatus,
+      audience: typed.audience === 'internal' ? 'internal' : 'everyone',
+      createdByUserId: typeof typed.createdByUserId === 'string' ? typed.createdByUserId : '',
+      presenterUserIds: Array.isArray(typed.presenterUserIds)
+        ? typed.presenterUserIds.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        : [],
+      attendeeIds: Array.isArray(typed.attendeeIds)
+        ? typed.attendeeIds.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        : [],
+      ...(typeof typed.muxLiveStreamId === 'string' ? { muxLiveStreamId: typed.muxLiveStreamId } : {}),
+      ...(typeof typed.muxPlaybackId === 'string' ? { muxPlaybackId: typed.muxPlaybackId } : {}),
+      ...(typeof typed.muxAssetId === 'string' ? { muxAssetId: typed.muxAssetId } : {}),
+      ...(typeof typed.resultingCourseId === 'string' || typed.resultingCourseId === null
+        ? { resultingCourseId: typed.resultingCourseId as string | null }
+        : {}),
+      ...(typeof typed.muxErrorMessage === 'string' ? { muxErrorMessage: typed.muxErrorMessage } : {}),
+    }
+    occurrences.push(normalized)
+  }
+  return occurrences
+}
+
+function normalizeLiveOccurrenceAttendancesFromRuntime(raw: unknown): AppState['liveOccurrenceAttendances'] {
+  if (!Array.isArray(raw)) return []
+  const attendances: AppState['liveOccurrenceAttendances'] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const typed = entry as Record<string, unknown>
+    const id = typeof typed.id === 'string' ? typed.id.trim() : ''
+    const occurrenceId = typeof typed.occurrenceId === 'string' ? typed.occurrenceId.trim() : ''
+    const userId = typeof typed.userId === 'string' ? typed.userId.trim() : ''
+    if (!id || !occurrenceId || !userId) continue
+    const sourceRaw = typeof typed.source === 'string' ? typed.source : ''
+    const source: AppState['liveOccurrenceAttendances'][number]['source'] =
+      sourceRaw === 'replay'
+        ? 'replay'
+        : sourceRaw === 'live_auto'
+          ? 'live_auto'
+          : sourceRaw === 'live_manual'
+            ? 'live_manual'
+            : 'live_manual'
+    const attendedAt = typeof typed.attendedAt === 'string' ? typed.attendedAt : new Date().toISOString()
+    const watchedSeconds =
+      typeof typed.watchedSeconds === 'number' && Number.isFinite(typed.watchedSeconds)
+        ? Math.max(0, Math.round(typed.watchedSeconds))
+        : 0
+    const qualified = typeof typed.qualified === 'boolean' ? typed.qualified : true
+    const qualificationReasonRaw =
+      typeof typed.qualificationReason === 'string' ? typed.qualificationReason : ''
+    const qualificationReason =
+      qualificationReasonRaw === 'watch_threshold_and_end_presence'
+      || qualificationReasonRaw === 'watch_below_threshold'
+      || qualificationReasonRaw === 'not_active_near_end'
+      || qualificationReasonRaw === 'not_ended'
+      || qualificationReasonRaw === 'manual_marked'
+        ? qualificationReasonRaw
+        : qualified
+          ? 'manual_marked'
+          : 'not_ended'
+    attendances.push({
+      id,
+      occurrenceId,
+      userId,
+      attendedAt,
+      source,
+      joinedAt: typeof typed.joinedAt === 'string' ? typed.joinedAt : attendedAt,
+      lastActiveAt: typeof typed.lastActiveAt === 'string' ? typed.lastActiveAt : attendedAt,
+      watchedSeconds,
+      qualified,
+      qualifiedAt: typeof typed.qualifiedAt === 'string' ? typed.qualifiedAt : qualified ? attendedAt : undefined,
+      qualificationReason,
+    })
+  }
+  return attendances
+}
+
+function normalizeLiveRehearsalFromRuntime(raw: unknown): AppState['liveRehearsal'] {
+  if (!raw || typeof raw !== 'object') return null
+  const typed = raw as Record<string, unknown>
+  const id = typeof typed.id === 'string' ? typed.id.trim() : ''
+  const title = typeof typed.title === 'string' ? typed.title.trim() : ''
+  if (!id || !title) return null
+  return {
+    id,
+    title,
+    guidance: typeof typed.guidance === 'string' ? typed.guidance : '',
+    muxLiveStreamId: typeof typed.muxLiveStreamId === 'string' ? typed.muxLiveStreamId : undefined,
+    muxPlaybackId: typeof typed.muxPlaybackId === 'string' ? typed.muxPlaybackId : undefined,
+    updatedAt: typeof typed.updatedAt === 'string' ? typed.updatedAt : new Date().toISOString(),
+  }
 }
 
 const createQuestionId = (courseId: string, index: number) => `${courseId}-q-${index + 1}`
@@ -120,6 +280,11 @@ const canManageCourseMux = (role: UserRole | null, course: Course, userId: strin
 
 const canAuthorCourses = (role: UserRole | null): boolean =>
   role === 'instructor' || role === 'content_admin' || role === 'super_admin'
+
+const canManageLiveEvents = (role: UserRole | null): boolean => canAuthorCourses(role)
+
+const canConfigureRehearsal = (role: UserRole | null): boolean =>
+  role === 'content_admin' || role === 'super_admin'
 
 const normalizeCourseAudience = (value: unknown): CourseAudience =>
   value === 'internal' ? 'internal' : 'everyone'
@@ -264,6 +429,18 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
           transcript: runtime?.transcript ?? s.transcript,
           learningActivityLog: runtime?.learningActivityLog ?? s.learningActivityLog,
           learnerProfiles: normalizeLearnerProfiles(runtime?.learnerProfiles ?? s.learnerProfiles),
+          liveOccurrences:
+            runtime?.liveOccurrences != null
+              ? normalizeLiveOccurrencesFromRuntime(runtime.liveOccurrences)
+              : s.liveOccurrences,
+          liveOccurrenceAttendances:
+            runtime?.liveOccurrenceAttendances != null
+              ? normalizeLiveOccurrenceAttendancesFromRuntime(runtime.liveOccurrenceAttendances)
+              : s.liveOccurrenceAttendances,
+          liveRehearsal:
+            runtime?.liveRehearsal != null
+              ? normalizeLiveRehearsalFromRuntime(runtime.liveRehearsal)
+              : s.liveRehearsal,
         }))
         setCoursesSyncStatus('synced')
         setCoursesSyncMessage(null)
@@ -294,6 +471,9 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
     state.cpdLedger,
     state.transcript,
     state.learningActivityLog,
+    state.liveOccurrences,
+    state.liveOccurrenceAttendances,
+    state.liveRehearsal,
     state.removedCatalogCourseIds,
     coursesSyncStatus,
   ])
@@ -401,6 +581,7 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
             quizAttemptId: latestAttempt.id,
             certificateId,
             courseVersion: course.version,
+            awardMethod: 'quiz_completion' as const,
           },
         ],
         certificates: [
@@ -417,6 +598,7 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
             completionDate: now,
             quizAttemptId: latestAttempt.id,
             passThreshold: latestAttempt.passThreshold,
+            awardMethod: 'quiz_completion' as const,
           },
         ],
         cpdLedger: [
@@ -445,6 +627,7 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
             quizAttemptId: latestAttempt.id,
             passThreshold: latestAttempt.passThreshold,
             activityWatchedMinutes: enrollment.watchedMinutes,
+            awardMethod: 'quiz_completion' as const,
           },
         ],
         enrollments: draft.enrollments.map((item) =>
@@ -468,6 +651,7 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       role,
       code: createCode(),
       status: 'pending',
+      emailDeliveryStatus: 'pending',
       createdByUserId: currentUserId,
       createdAt: new Date().toISOString(),
     }
@@ -479,6 +663,80 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
   const inviteUser = useCallback(
     (email: string, _fullName: string, role: UserRole): Invite => issueInvite(email, role),
     [issueInvite],
+  )
+
+  const sendInviteEmail = useCallback(
+    async (
+      inviteId: string,
+      options?: { clerkSessionToken?: string | null; signUpUrl?: string | null; invite?: Invite },
+    ): Promise<ActionResult> => {
+      if (currentUserRole !== 'hr_admin' && currentUserRole !== 'super_admin') {
+        return { ok: false, message: 'Only HR Admin or Super Admin can send invite emails.' }
+      }
+      const inviteFromState = state.invites.find((entry) => entry.id === inviteId)
+      const invite = inviteFromState ?? options?.invite
+      if (!invite) {
+        return { ok: false, message: 'Invite not found.' }
+      }
+      if (invite.status !== 'pending') {
+        return { ok: false, message: 'Only pending invites can be emailed.' }
+      }
+      if (!isInviteFunctionConfigured()) {
+        return {
+          ok: false,
+          message:
+            'Invite email is not configured. Set supabaseUrl (or feedbackFunctionUrl) and deploy the invite-user Edge Function.',
+        }
+      }
+      const token = options?.clerkSessionToken?.trim()
+      if (!token) {
+        return {
+          ok: false,
+          message: 'Could not verify your Clerk session. Sign in again, then resend the invite.',
+        }
+      }
+
+      try {
+        await sendInviteEmailViaEdge({
+          email: invite.email,
+          role: invite.role,
+          inviteCode: invite.code,
+          clerkSessionToken: token,
+          signUpUrl: options?.signUpUrl,
+        })
+        const now = new Date().toISOString()
+        setState((prev) => ({
+          ...prev,
+          invites: prev.invites.map((entry) =>
+            entry.id === inviteId
+              ? {
+                  ...entry,
+                  emailDeliveryStatus: 'sent',
+                  emailSentAt: now,
+                  emailDeliveryError: undefined,
+                }
+              : entry,
+          ),
+        }))
+        return { ok: true }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Could not send invite email.'
+        setState((prev) => ({
+          ...prev,
+          invites: prev.invites.map((entry) =>
+            entry.id === inviteId
+              ? {
+                  ...entry,
+                  emailDeliveryStatus: 'failed',
+                  emailDeliveryError: message,
+                }
+              : entry,
+          ),
+        }))
+        return { ok: false, message }
+      }
+    },
+    [currentUserRole, state.invites],
   )
 
   const deletePendingInvite = useCallback(
@@ -597,8 +855,8 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
           cpdLedger: prev.cpdLedger.filter((c) => c.userId !== userId),
           transcript: prev.transcript.filter((t) => t.userId !== userId),
           learningActivityLog: prev.learningActivityLog.filter((a) => a.userId !== userId),
-          webinarAttendances: prev.webinarAttendances.filter((w) => w.userId !== userId),
-          webinars: prev.webinars.map((w) => ({
+          liveOccurrenceAttendances: prev.liveOccurrenceAttendances.filter((w) => w.userId !== userId),
+          liveOccurrences: prev.liveOccurrences.map((w) => ({
             ...w,
             attendeeIds: w.attendeeIds.filter((id) => id !== userId),
           })),
@@ -1199,44 +1457,547 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
     [state.courses, currentUserRole, currentUser],
   )
 
-  const toggleWebinarAttendance = useCallback(
-    (webinarId: string) => {
-      if (!currentUser) return
-      setState((prev) => {
-        const existing = prev.webinarAttendances.find(
-          (item) => item.webinarId === webinarId && item.userId === currentUser.id,
-        )
+  const appendLiveAttendanceArtifacts = useCallback(
+    (draft: AppState, occurrence: LiveOccurrence, attendance: AppState['liveOccurrenceAttendances'][number]) => {
+      const courseId = occurrence.resultingCourseId?.trim()
+      if (!courseId) return draft
+      const course = draft.courses.find((item) => item.id === courseId)
+      if (!course) return draft
+      if (hasCompletionForCourse(draft.completions, attendance.userId, courseId)) return draft
 
-        const nextAttendances = existing
-          ? prev.webinarAttendances.filter((item) => item.id !== existing.id)
-          : [
-              ...prev.webinarAttendances,
-              {
-                id: createId('wa'),
-                webinarId,
-                userId: currentUser.id,
-                attendedAt: new Date().toISOString(),
-              },
-            ]
+      const now = new Date().toISOString()
+      const cpdProviderName = course.cpdProviderName?.trim() || getCpdProviderName()
+      const cpdHours = getCourseCPDHours(course) || getCourseCPDHours({ videoMinutes: occurrence.expectedMinutes })
+      const completionDate = attendance.qualifiedAt ?? attendance.attendedAt ?? now
+      const attendanceThresholdPercent = Math.round(LIVE_ATTENDANCE_REQUIRED_WATCH_RATIO * 100)
+      const liveAttemptId = `qa-live-${occurrence.id}-${attendance.userId}`
+      const watchedMinutes = Math.max(course.videoMinutes, occurrence.expectedMinutes)
+      const existingEnrollment = draft.enrollments.find(
+        (item) => item.userId === attendance.userId && item.courseId === courseId,
+      )
+      const enrollmentId = existingEnrollment?.id ?? createId('enr')
+      const enrollmentAttemptExists = existingEnrollment?.quizAttempts.some((attempt) => attempt.id === liveAttemptId)
+      const nextAttempts = enrollmentAttemptExists
+        ? existingEnrollment?.quizAttempts ?? []
+        : [
+            ...(existingEnrollment?.quizAttempts ?? []),
+            {
+              id: liveAttemptId,
+              userId: attendance.userId,
+              courseId,
+              answers: {},
+              scorePercent: 100,
+              passed: true,
+              submittedAt: completionDate,
+              attemptNumber: (existingEnrollment?.quizAttempts.length ?? 0) + 1,
+              passThreshold: attendanceThresholdPercent,
+              renderedQuestions: [],
+              generatedQuestionCount: 0,
+              shownQuestionCount: 0,
+            },
+          ]
 
-        const nextWebinars = prev.webinars.map((webinar) => {
-          if (webinar.id !== webinarId) return webinar
+      const certificateId = createId('cert')
+      const completionId = createId('comp')
+      const verificationCode = `TW-${Math.random().toString(36).slice(2, 10).toUpperCase()}`
+      const nextEnrollment: Enrollment = {
+        id: enrollmentId,
+        userId: attendance.userId,
+        courseId,
+        enrolledAt: existingEnrollment?.enrolledAt ?? completionDate,
+        watchedMinutes: Math.max(existingEnrollment?.watchedMinutes ?? 0, watchedMinutes),
+        quizAttempts: nextAttempts,
+        completedAt: completionDate,
+        certificateId,
+      }
 
-          const attendeeIds = existing
-            ? webinar.attendeeIds.filter((id) => id !== currentUser.id)
-            : [...new Set([...webinar.attendeeIds, currentUser.id])]
-          return { ...webinar, attendeeIds }
-        })
+      return {
+        ...draft,
+        completions: [
+          ...draft.completions,
+          {
+            id: completionId,
+            userId: attendance.userId,
+            courseId,
+            completionDate,
+            cpdHours,
+            quizAttemptId: liveAttemptId,
+            certificateId,
+            courseVersion: course.version,
+            awardMethod: 'live_attendance' as const,
+          },
+        ],
+        certificates: [
+          ...draft.certificates,
+          {
+            id: certificateId,
+            userId: attendance.userId,
+            courseId,
+            verificationCode,
+            issuedAt: completionDate,
+            providerName: cpdProviderName,
+            courseTitle: course.title,
+            durationHours: cpdHours,
+            completionDate,
+            quizAttemptId: liveAttemptId,
+            passThreshold: attendanceThresholdPercent,
+            awardMethod: 'live_attendance' as const,
+          },
+        ],
+        cpdLedger: [
+          ...draft.cpdLedger,
+          {
+            id: createId('cpd'),
+            userId: attendance.userId,
+            courseId,
+            completionId,
+            hoursAwarded: cpdHours,
+            createdAt: completionDate,
+          },
+        ],
+        transcript: [
+          ...draft.transcript,
+          {
+            id: createId('tr'),
+            userId: attendance.userId,
+            courseId,
+            courseTitle: course.title,
+            completedAt: completionDate,
+            cpdHours,
+            certificateId,
+            verificationCode,
+            providerName: cpdProviderName,
+            quizAttemptId: liveAttemptId,
+            passThreshold: attendanceThresholdPercent,
+            activityWatchedMinutes: Math.max(0, Math.round((attendance.watchedSeconds ?? 0) / 60)),
+            awardMethod: 'live_attendance' as const,
+          },
+        ],
+        enrollments: existingEnrollment
+          ? draft.enrollments.map((item) => (item.id === existingEnrollment.id ? nextEnrollment : item))
+          : [...draft.enrollments, nextEnrollment],
+      }
+    },
+    [],
+  )
 
+  const appendLiveAttendanceArtifactsForOccurrence = useCallback(
+    (draft: AppState, occurrenceId: string): AppState => {
+      const occurrence = draft.liveOccurrences.find((item) => item.id === occurrenceId)
+      if (!occurrence) return draft
+      if (!occurrence.resultingCourseId) return draft
+      const qualifiedAttendances = draft.liveOccurrenceAttendances.filter(
+        (item) => item.occurrenceId === occurrenceId && item.qualified && item.source !== 'replay',
+      )
+      return qualifiedAttendances.reduce<AppState>(
+        (next, attendance) => appendLiveAttendanceArtifacts(next, occurrence, attendance),
+        draft,
+      )
+    },
+    [appendLiveAttendanceArtifacts],
+  )
+
+  const finalizeLiveOccurrenceAttendanceInDraft = useCallback(
+    (draft: AppState, occurrenceId: string, userId?: string): AppState => {
+      const occurrence = draft.liveOccurrences.find((item) => item.id === occurrenceId)
+      if (!occurrence) return draft
+      let changed = false
+      const now = new Date().toISOString()
+      const nextAttendances = draft.liveOccurrenceAttendances.map((item) => {
+        if (item.occurrenceId !== occurrenceId) return item
+        if (userId && item.userId !== userId) return item
+        if (item.source === 'replay') return item
+
+        const evaluation = evaluateLiveAttendanceQualification(occurrence, item)
+        const nextQualified = evaluation.qualified
+        const nextQualifiedAt = nextQualified ? item.qualifiedAt ?? now : undefined
+        const nextAttendedAt = nextQualified ? item.attendedAt || nextQualifiedAt || now : item.attendedAt
+        const nextReason = nextQualified ? 'watch_threshold_and_end_presence' : evaluation.reason
+        const unchanged =
+          (item.qualified ?? false) === nextQualified
+          && item.qualifiedAt === nextQualifiedAt
+          && item.attendedAt === nextAttendedAt
+          && item.qualificationReason === nextReason
+        if (unchanged) return item
+        changed = true
         return {
-          ...prev,
-          webinarAttendances: nextAttendances,
-          webinars: nextWebinars,
+          ...item,
+          qualified: nextQualified,
+          qualifiedAt: nextQualifiedAt,
+          attendedAt: nextAttendedAt,
+          qualificationReason: nextReason,
         }
       })
+
+      if (!changed) return appendLiveAttendanceArtifactsForOccurrence(draft, occurrenceId)
+
+      const attendeeIds = nextAttendances
+        .filter((item) => item.occurrenceId === occurrenceId && item.qualified)
+        .map((item) => item.userId)
+      const dedupedAttendeeIds = [...new Set(attendeeIds)]
+      const nextDraft: AppState = {
+        ...draft,
+        liveOccurrenceAttendances: nextAttendances,
+        liveOccurrences: draft.liveOccurrences.map((item) =>
+          item.id === occurrenceId ? { ...item, attendeeIds: dedupedAttendeeIds } : item,
+        ),
+      }
+      return appendLiveAttendanceArtifactsForOccurrence(nextDraft, occurrenceId)
     },
-    [currentUser],
+    [appendLiveAttendanceArtifactsForOccurrence],
   )
+
+  const markLiveOccurrenceAttendance = useCallback(
+    (occurrenceId: string, source: 'live_manual' | 'replay' = 'live_manual') => {
+      if (!currentUser) return
+      setState((prev) => {
+        const occurrence = prev.liveOccurrences.find((item) => item.id === occurrenceId)
+        if (!occurrence) return prev
+        const now = new Date().toISOString()
+        const existing = prev.liveOccurrenceAttendances.find(
+          (item) => item.occurrenceId === occurrenceId && item.userId === currentUser.id,
+        )
+        const nextAttendance: AppState['liveOccurrenceAttendances'][number] = existing
+          ? {
+              ...existing,
+              attendedAt: existing.attendedAt || now,
+              source,
+              joinedAt: existing.joinedAt ?? now,
+              lastActiveAt: now,
+              watchedSeconds: Math.max(
+                existing.watchedSeconds ?? 0,
+                Math.max(1, Math.round(occurrence.expectedMinutes * 60)),
+              ),
+              qualified: true,
+              qualifiedAt: existing.qualifiedAt ?? now,
+              qualificationReason: 'manual_marked' as const,
+            }
+          : {
+              id: createId('la'),
+              occurrenceId,
+              userId: currentUser.id,
+              attendedAt: now,
+              source,
+              joinedAt: now,
+              lastActiveAt: now,
+              watchedSeconds: Math.max(1, Math.round(occurrence.expectedMinutes * 60)),
+              qualified: true,
+              qualifiedAt: now,
+              qualificationReason: 'manual_marked' as const,
+            }
+        const nextAttendances = existing
+          ? prev.liveOccurrenceAttendances.map((item) => (item.id === existing.id ? nextAttendance : item))
+          : [...prev.liveOccurrenceAttendances, nextAttendance]
+        const nextDraft: AppState = {
+          ...prev,
+          liveOccurrenceAttendances: nextAttendances,
+          liveOccurrences: prev.liveOccurrences.map((item) =>
+            item.id === occurrenceId
+              ? { ...item, attendeeIds: [...new Set([...item.attendeeIds, currentUser.id])] }
+              : item,
+          ),
+        }
+        return appendLiveAttendanceArtifactsForOccurrence(nextDraft, occurrenceId)
+      })
+    },
+    [currentUser, appendLiveAttendanceArtifactsForOccurrence],
+  )
+
+  const startLiveOccurrenceWatch = useCallback(
+    (occurrenceId: string) => {
+      if (!currentUser) return
+      setState((prev) => {
+        const occurrence = prev.liveOccurrences.find((item) => item.id === occurrenceId)
+        if (!occurrence) return prev
+        const now = new Date().toISOString()
+        const existing = prev.liveOccurrenceAttendances.find(
+          (item) => item.occurrenceId === occurrenceId && item.userId === currentUser.id,
+        )
+        const source: AppState['liveOccurrenceAttendances'][number]['source'] =
+          existing?.source === 'live_manual' ? 'live_manual' : 'live_auto'
+        const nextAttendance: AppState['liveOccurrenceAttendances'][number] = existing
+          ? {
+              ...existing,
+              source,
+              joinedAt: existing.joinedAt ?? now,
+              lastActiveAt: now,
+              watchedSeconds: Math.max(0, existing.watchedSeconds ?? 0),
+              qualificationReason: existing.qualificationReason ?? 'not_ended',
+            }
+          : {
+              id: createId('la'),
+              occurrenceId,
+              userId: currentUser.id,
+              attendedAt: now,
+              source: 'live_auto' as const,
+              joinedAt: now,
+              lastActiveAt: now,
+              watchedSeconds: 0,
+              qualified: false,
+              qualificationReason: 'not_ended' as const,
+            }
+        const nextAttendances = existing
+          ? prev.liveOccurrenceAttendances.map((item) => (item.id === existing.id ? nextAttendance : item))
+          : [...prev.liveOccurrenceAttendances, nextAttendance]
+        const nextDraft: AppState = {
+          ...prev,
+          liveOccurrenceAttendances: nextAttendances,
+          liveOccurrences: prev.liveOccurrences.map((item) =>
+            item.id === occurrenceId
+              ? { ...item, attendeeIds: [...new Set([...item.attendeeIds, currentUser.id])] }
+              : item,
+          ),
+        }
+        return occurrence.status === 'ended'
+          ? finalizeLiveOccurrenceAttendanceInDraft(nextDraft, occurrenceId, currentUser.id)
+          : nextDraft
+      })
+    },
+    [currentUser, finalizeLiveOccurrenceAttendanceInDraft],
+  )
+
+  const heartbeatLiveOccurrenceWatch = useCallback(
+    (occurrenceId: string, deltaSeconds: number) => {
+      if (!currentUser) return
+      const boundedDelta = clampLiveAttendanceHeartbeatDeltaSeconds(
+        Math.min(deltaSeconds, LIVE_ATTENDANCE_HEARTBEAT_MAX_DELTA_SECONDS),
+      )
+      if (boundedDelta <= 0) return
+      setState((prev) => {
+        const occurrence = prev.liveOccurrences.find((item) => item.id === occurrenceId)
+        if (!occurrence) return prev
+        const now = new Date().toISOString()
+        const existing = prev.liveOccurrenceAttendances.find(
+          (item) => item.occurrenceId === occurrenceId && item.userId === currentUser.id,
+        )
+        const base: AppState['liveOccurrenceAttendances'][number] = existing ?? {
+          id: createId('la'),
+          occurrenceId,
+          userId: currentUser.id,
+          attendedAt: now,
+          source: 'live_auto' as const,
+          joinedAt: now,
+          watchedSeconds: 0,
+          qualified: false,
+          qualificationReason: 'not_ended' as const,
+        }
+        const nextAttendance: AppState['liveOccurrenceAttendances'][number] = {
+          ...base,
+          source: base.source === 'live_manual' ? 'live_manual' : 'live_auto',
+          lastActiveAt: now,
+          watchedSeconds: Math.max(0, (base.watchedSeconds ?? 0) + boundedDelta),
+        }
+        const nextAttendances = existing
+          ? prev.liveOccurrenceAttendances.map((item) => (item.id === existing.id ? nextAttendance : item))
+          : [...prev.liveOccurrenceAttendances, nextAttendance]
+        const nextDraft: AppState = {
+          ...prev,
+          liveOccurrenceAttendances: nextAttendances,
+          liveOccurrences: prev.liveOccurrences.map((item) =>
+            item.id === occurrenceId
+              ? { ...item, attendeeIds: [...new Set([...item.attendeeIds, currentUser.id])] }
+              : item,
+          ),
+        }
+        return occurrence.status === 'ended'
+          ? finalizeLiveOccurrenceAttendanceInDraft(nextDraft, occurrenceId, currentUser.id)
+          : nextDraft
+      })
+    },
+    [currentUser, finalizeLiveOccurrenceAttendanceInDraft],
+  )
+
+  const stopLiveOccurrenceWatch = useCallback(
+    (occurrenceId: string) => {
+      if (!currentUser) return
+      setState((prev) => {
+        const occurrence = prev.liveOccurrences.find((item) => item.id === occurrenceId)
+        if (!occurrence) return prev
+        const existing = prev.liveOccurrenceAttendances.find(
+          (item) => item.occurrenceId === occurrenceId && item.userId === currentUser.id,
+        )
+        if (!existing) return prev
+        const now = new Date().toISOString()
+        const nextDraft: AppState = {
+          ...prev,
+          liveOccurrenceAttendances: prev.liveOccurrenceAttendances.map((item) =>
+            item.id === existing.id ? { ...item, lastActiveAt: now } : item,
+          ),
+        }
+        return occurrence.status === 'ended'
+          ? finalizeLiveOccurrenceAttendanceInDraft(nextDraft, occurrenceId, currentUser.id)
+          : nextDraft
+      })
+    },
+    [currentUser, finalizeLiveOccurrenceAttendanceInDraft],
+  )
+
+  const finalizeLiveOccurrenceAttendance = useCallback(
+    (occurrenceId: string) => {
+      if (!currentUser) return
+      setState((prev) => finalizeLiveOccurrenceAttendanceInDraft(prev, occurrenceId, currentUser.id))
+    },
+    [currentUser, finalizeLiveOccurrenceAttendanceInDraft],
+  )
+
+  const createLiveOccurrence = useCallback(
+    async (
+      input: CreateLiveOccurrenceInput,
+    ): Promise<{ ok: true; occurrence: LiveOccurrence } | { ok: false; message: string }> => {
+      if (!currentUser || !canManageLiveEvents(currentUserRole)) {
+        return { ok: false, message: 'You do not have permission to schedule live events.' }
+      }
+      const title = input.title.trim()
+      if (!title) return { ok: false, message: 'Live session title is required.' }
+      const startAtIso = input.startAt ? new Date(input.startAt).toISOString() : ''
+      if (!startAtIso || Number.isNaN(Date.parse(startAtIso))) {
+        return { ok: false, message: 'A valid start date/time is required.' }
+      }
+      const expectedMinutes = Math.max(30, Math.round(input.expectedMinutes || 60))
+      const occurrenceId = createId('live')
+      const fallbackLiveStreamId = `local-${occurrenceId}`
+      let muxLiveStreamId = fallbackLiveStreamId
+      let muxPlaybackId: string | undefined
+      let muxStreamKey: string | undefined
+      let streamError: string | undefined
+      if (isMuxFunctionConfigured()) {
+        try {
+          const created = await createMuxLiveStream({
+            title,
+            latencyMode: 'low',
+            reconnectWindowSeconds: 90,
+            passthrough: `live_occurrence:${occurrenceId}`,
+          })
+          muxLiveStreamId = created.liveStreamId
+          muxPlaybackId = created.playbackId ?? undefined
+          muxStreamKey = created.streamKey ?? undefined
+        } catch (e) {
+          streamError = e instanceof Error ? e.message : 'Could not provision a Mux live stream.'
+        }
+      }
+
+      const occurrence: LiveOccurrence = {
+        id: occurrenceId,
+        title,
+        description: input.description.trim(),
+        startAt: startAtIso,
+        expectedMinutes,
+        status: 'scheduled',
+        conversionStatus: streamError ? 'failed' : 'scheduled',
+        audience: input.audience,
+        createdByUserId: currentUser.id,
+        presenterUserIds: input.presenterUserIds?.length ? input.presenterUserIds : [currentUser.id],
+        attendeeIds: [],
+        muxLiveStreamId,
+        muxPlaybackId,
+        muxStreamKey,
+        resultingCourseId: null,
+        muxErrorMessage: streamError,
+      }
+      setState((prev) => ({
+        ...prev,
+        liveOccurrences: [...prev.liveOccurrences, occurrence].sort((a, b) => a.startAt.localeCompare(b.startAt)),
+      }))
+      return { ok: true, occurrence }
+    },
+    [currentUser, currentUserRole],
+  )
+
+  const syncLiveOccurrenceStatus = useCallback(
+    async (occurrenceId: string): Promise<ActionResult> => {
+      const occurrence = state.liveOccurrences.find((item) => item.id === occurrenceId)
+      if (!occurrence) return { ok: false, message: 'Live occurrence not found.' }
+      if (!occurrence.muxLiveStreamId || occurrence.muxLiveStreamId.startsWith('local-')) {
+        return { ok: false, message: 'This occurrence has no live stream assigned yet.' }
+      }
+      try {
+        const live = await getMuxLiveStream(occurrence.muxLiveStreamId)
+        const statusRaw = (live.status ?? '').toLowerCase()
+        const nextStatus: LiveOccurrence['status'] =
+          statusRaw === 'active' ? 'live' : live.recentAssetId ? 'ended' : 'scheduled'
+        const nextConversion: LiveOccurrence['conversionStatus'] =
+          statusRaw === 'active'
+            ? 'live'
+            : live.recentAssetId
+              ? occurrence.resultingCourseId
+                ? 'draft_created'
+                : 'asset_ready'
+              : 'scheduled'
+
+        let assetPlaybackId = live.playbackId
+        let expectedMinutes = occurrence.expectedMinutes
+        if (live.recentAssetId) {
+          const asset = await getMuxAsset(live.recentAssetId)
+          if (asset.playbackId) {
+            assetPlaybackId = asset.playbackId
+          }
+          if (asset.durationSeconds != null) {
+            expectedMinutes = muxDurationSecondsToMinutes(asset.durationSeconds)
+          }
+        }
+        setState((prev) => {
+          const nextDraft: AppState = {
+            ...prev,
+            liveOccurrences: prev.liveOccurrences.map((item) =>
+              item.id === occurrenceId
+                ? {
+                    ...item,
+                    status: nextStatus,
+                    conversionStatus: nextConversion,
+                    muxPlaybackId: assetPlaybackId ?? item.muxPlaybackId,
+                    muxAssetId: live.recentAssetId ?? item.muxAssetId,
+                    expectedMinutes,
+                    muxErrorMessage: undefined,
+                  }
+                : item,
+            ),
+          }
+          return nextStatus === 'ended'
+            ? finalizeLiveOccurrenceAttendanceInDraft(nextDraft, occurrenceId)
+            : nextDraft
+        })
+        return { ok: true }
+      } catch (e) {
+        const message = e instanceof Error ? e.message : 'Could not refresh live status.'
+        setState((prev) => ({
+          ...prev,
+          liveOccurrences: prev.liveOccurrences.map((item) =>
+            item.id === occurrenceId ? { ...item, conversionStatus: 'failed', muxErrorMessage: message } : item,
+          ),
+        }))
+        return { ok: false, message }
+      }
+    },
+    [state.liveOccurrences, finalizeLiveOccurrenceAttendanceInDraft],
+  )
+
+  const provisionLiveRehearsalStream = useCallback(async (): Promise<ActionResult> => {
+    if (!currentUser || !canConfigureRehearsal(currentUserRole)) {
+      return { ok: false, message: 'Only content admins can configure rehearsal.' }
+    }
+    try {
+      const rehearsal = isMuxFunctionConfigured()
+        ? await getOrCreateMuxRehearsalStream()
+        : { liveStreamId: 'local-rehearsal', playbackId: null, streamKey: null }
+      setState((prev) => ({
+        ...prev,
+        liveRehearsal: {
+          id: prev.liveRehearsal?.id ?? 'rehearsal-default',
+          title: prev.liveRehearsal?.title ?? 'Presenter rehearsal stream',
+          guidance:
+            prev.liveRehearsal?.guidance ??
+            'Use this stream to validate camera, microphone, and screen-share before going live.',
+          muxLiveStreamId: rehearsal.liveStreamId,
+          muxPlaybackId: rehearsal.playbackId ?? undefined,
+          muxStreamKey: rehearsal.streamKey ?? undefined,
+          updatedAt: new Date().toISOString(),
+        },
+      }))
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : 'Could not configure rehearsal stream.' }
+    }
+  }, [currentUser, currentUserRole])
 
   const transcriptForCurrentUser = useMemo(
     () => state.transcript.filter((entry) => entry.userId === currentUserId),
@@ -1254,6 +2015,7 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       syncAuthUser,
       issueInvite,
       inviteUser,
+      sendInviteEmail,
       deletePendingInvite,
       acceptInvite,
       suspendUser,
@@ -1269,7 +2031,14 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       deleteDraftCourse,
       transitionCourseStatus,
       updateCourseVideo,
-      toggleWebinarAttendance,
+      createLiveOccurrence,
+      syncLiveOccurrenceStatus,
+      provisionLiveRehearsalStream,
+      markLiveOccurrenceAttendance,
+      startLiveOccurrenceWatch,
+      heartbeatLiveOccurrenceWatch,
+      stopLiveOccurrenceWatch,
+      finalizeLiveOccurrenceAttendance,
       getCourseReadiness,
       getActiveEnrollment,
       transcriptForCurrentUser,
@@ -1289,6 +2058,7 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       syncAuthUser,
       issueInvite,
       inviteUser,
+      sendInviteEmail,
       deletePendingInvite,
       acceptInvite,
       suspendUser,
@@ -1304,7 +2074,14 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       deleteDraftCourse,
       transitionCourseStatus,
       updateCourseVideo,
-      toggleWebinarAttendance,
+      createLiveOccurrence,
+      syncLiveOccurrenceStatus,
+      provisionLiveRehearsalStream,
+      markLiveOccurrenceAttendance,
+      startLiveOccurrenceWatch,
+      heartbeatLiveOccurrenceWatch,
+      stopLiveOccurrenceWatch,
+      finalizeLiveOccurrenceAttendance,
       getCourseReadiness,
       getActiveEnrollment,
       transcriptForCurrentUser,

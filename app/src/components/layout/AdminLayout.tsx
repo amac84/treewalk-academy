@@ -11,6 +11,8 @@ type AdminSideLink = { label: string; to: string; roles?: UserRole[]; end?: bool
 
 const contentLinksDef: AdminSideLink[] = [
   { label: 'Courses', to: '/admin/courses', roles: courseRoles },
+  { label: 'Live Events', to: '/admin/live-events', roles: courseRoles, end: true },
+  { label: 'Live broadcast (OBS)', to: '/admin/live-events/presenter-guide', roles: courseRoles },
 ]
 
 const adminLinksDef: AdminSideLink[] = [

@@ -12,7 +12,7 @@ export const ROLE_REFERENCE_ITEMS: RoleReferenceItem[] = [
     role: 'learner',
     label: 'Learner',
     summary:
-      'Uses the learning app only: home, course catalog, my learning, webinars, and quizzes. No admin areas.',
+      'Uses the learning app only: home, course catalog, my learning, live sessions, and quizzes. No admin areas.',
   },
   {
     role: 'instructor',

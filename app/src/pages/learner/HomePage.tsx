@@ -4,7 +4,7 @@ import { formatCpdHours, getCourseCPDHours } from '../../lib/cpd'
 import { learnerCanAccessCourse } from '../../lib/courseAccess'
 
 export function HomePage() {
-  const { currentUser, currentUserId, courses, enrollments, webinars, getCourseReadiness } = useAppStore()
+  const { currentUser, currentUserId, courses, enrollments, liveOccurrences, getCourseReadiness } = useAppStore()
 
   if (!currentUser) {
     return null
@@ -32,8 +32,8 @@ export function HomePage() {
     .filter((course) => !userEnrollments.some((enrollment) => enrollment.courseId === course.id))
     .slice(0, 4)
 
-  const upcomingWebinars = webinars
-    .filter((webinar) => webinar.status === 'upcoming')
+  const upcomingWebinars = liveOccurrences
+    .filter((webinar) => webinar.status === 'scheduled' || webinar.status === 'live')
     .sort((a, b) => a.startAt.localeCompare(b.startAt))
     .slice(0, 3)
 
@@ -177,15 +177,15 @@ export function HomePage() {
 
       <section className="section-block section-block--split">
         <div className="section-head">
-          <h2>Upcoming webinars</h2>
-          <Link to="/webinars">See all webinars</Link>
+          <h2>Upcoming live sessions</h2>
+          <Link to="/webinars">See all sessions</Link>
         </div>
         <div className="card-grid">
           {upcomingWebinars.map((webinar) => (
             <article key={webinar.id} className="simple-card">
               <h3>{webinar.title}</h3>
               <p className="muted">{new Date(webinar.startAt).toLocaleString()}</p>
-              <p>Provider: {webinar.provider}</p>
+              <p>Duration: ~{webinar.expectedMinutes} min</p>
               <p>Attendance: {webinar.attendeeIds.length}</p>
             </article>
           ))}

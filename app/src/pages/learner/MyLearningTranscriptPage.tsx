@@ -32,6 +32,7 @@ export function MyLearningTranscriptPage() {
         passThreshold: entry.passThreshold,
         verificationCode: entry.verificationCode,
         certificateId: entry.certificateId,
+        awardMethod: entry.awardMethod,
       })
     },
     [certificates, courses, user?.name],
@@ -81,7 +82,11 @@ export function MyLearningTranscriptPage() {
                     <td>{toPrettyDate(entry.completedAt)}</td>
                     <td>{entry.cpdHours.toFixed(2)}</td>
                     <td>{resolveCpdProviderForTranscriptEntry(entry, courses)}</td>
-                    <td>{entry.passThreshold}%</td>
+                    <td>
+                      {entry.awardMethod === 'live_attendance'
+                        ? `Live attendance (${entry.passThreshold}%)`
+                        : `${entry.passThreshold}%`}
+                    </td>
                     <td>{entry.verificationCode}</td>
                     <td>
                       <button

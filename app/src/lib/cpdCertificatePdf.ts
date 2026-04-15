@@ -10,6 +10,7 @@ export type CpdCompletionCertificateInput = {
   passThreshold: number
   verificationCode: string
   certificateId: string
+  awardMethod?: 'quiz_completion' | 'live_attendance'
 }
 
 function formatLongDate(iso: string): string {
@@ -83,8 +84,11 @@ export function buildCpdCompletionCertificatePdfBlob(input: CpdCompletionCertifi
   doc.setFont('times', 'normal')
   doc.setFontSize(11)
   const intro =
-    'This certificate confirms that the individual named below successfully completed the learning activity and ' +
-    'met the published pass threshold for the end-of-course knowledge assessment.'
+    input.awardMethod === 'live_attendance'
+      ? 'This certificate confirms that the individual named below successfully completed the learning activity and ' +
+        'met the published live attendance threshold.'
+      : 'This certificate confirms that the individual named below successfully completed the learning activity and ' +
+        'met the published pass threshold for the end-of-course knowledge assessment.'
   const introLines = doc.splitTextToSize(intro, contentW)
   doc.text(introLines, pageW / 2, 66, { align: 'center' })
 
@@ -101,7 +105,10 @@ export function buildCpdCompletionCertificatePdfBlob(input: CpdCompletionCertifi
     ['Date completed', formatLongDate(input.completionDateIso)],
     ['CPD hours', `${input.cpdHours.toFixed(2)}`],
     ['CPD provider', input.providerName],
-    ['Assessment pass threshold', `${input.passThreshold}%`],
+    [
+      input.awardMethod === 'live_attendance' ? 'Live attendance threshold' : 'Assessment pass threshold',
+      `${input.passThreshold}%`,
+    ],
     ['Verification reference', input.verificationCode],
     ['Certificate record ID', input.certificateId],
     ['Certificate issued', formatLongDate(input.issuedAtIso)],
