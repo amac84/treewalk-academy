@@ -17,7 +17,7 @@ import { COURSE_METADATA_MODEL, COURSE_QUIZ_MODEL } from './openaiConfig.ts'
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type, x-clerk-session-token',
+    'authorization, x-client-info, apikey, content-type, x-clerk-session-token, mux-signature',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 } as const
 
@@ -37,6 +37,10 @@ function isAcademyRole(value: unknown): value is AcademyRole {
 type AuthOk = { ok: true; userId: string }
 type AuthErr = { ok: false; response: Response }
 
+const ACADEMY_COURSES_TABLE = 'academy_courses'
+const RUNTIME_STATE_ROW_ID = '__academy_runtime_state__'
+const LIVE_REHEARSAL_ROW_ID = '__academy_live_rehearsal__'
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -44,6 +48,14 @@ Deno.serve(async (request) => {
 
   if (request.method !== 'POST') {
     return jsonResponse({ ok: false, error: 'Method not allowed.' }, 405)
+  }
+
+  const url = new URL(request.url)
+  if (url.pathname.endsWith('/webhook')) {
+    return await handleMuxWebhook(request)
+  }
+  if (url.pathname.endsWith('/auto-transcribe-live')) {
+    return await handleAutoTranscribeLiveRequest(request)
   }
 
   const auth = await authorizeRequest(request)
@@ -113,6 +125,14 @@ Deno.serve(async (request) => {
         return await handleGetUpload(tokenId, tokenSecret, body)
       case 'get_asset':
         return await handleGetAsset(tokenId, tokenSecret, body)
+      case 'create_live_stream':
+        return await handleCreateLiveStream(tokenId, tokenSecret, body)
+      case 'get_live_stream':
+        return await handleGetLiveStream(tokenId, tokenSecret, body)
+      case 'list_live_streams':
+        return await handleListLiveStreams(tokenId, tokenSecret, body)
+      case 'get_or_create_rehearsal_stream':
+        return await handleGetOrCreateRehearsalStream(tokenId, tokenSecret)
       case 'delete_mux_asset':
         return await handleDeleteMuxAsset(request, tokenId, tokenSecret, body)
       case 'transcribe_file':
@@ -125,7 +145,7 @@ Deno.serve(async (request) => {
           {
             ok: false,
             error:
-              'Unknown action. Use create_direct_upload, get_upload, get_asset, delete_mux_asset, transcribe_file, summarize_transcript, draft_course_metadata, or generate_quiz_bank.',
+              'Unknown action. Use create_direct_upload, get_upload, get_asset, create_live_stream, get_live_stream, list_live_streams, get_or_create_rehearsal_stream, delete_mux_asset, transcribe_file, summarize_transcript, draft_course_metadata, or generate_quiz_bank.',
           },
           400,
         )
@@ -299,6 +319,908 @@ async function handleGetAsset(
     playbackIds: data?.playback_ids ?? [],
     durationSeconds,
   })
+}
+
+function normalizeLiveLatencyMode(value: unknown): 'low' | 'standard' {
+  return value === 'standard' ? 'standard' : 'low'
+}
+
+function liveStreamSummaryFromMuxData(data: Record<string, unknown> | undefined) {
+  const playback = Array.isArray(data?.playback_ids) ? data?.playback_ids : []
+  const playbackId =
+    playback[0] && typeof playback[0] === 'object' && !Array.isArray(playback[0])
+      ? ((playback[0] as Record<string, unknown>).id as string | undefined)
+      : undefined
+  const recentAssetIds = Array.isArray(data?.recent_asset_ids) ? data.recent_asset_ids : []
+  const recentAssetId = typeof recentAssetIds[0] === 'string' ? recentAssetIds[0] : null
+  return {
+    liveStreamId: typeof data?.id === 'string' ? data.id : '',
+    status: typeof data?.status === 'string' ? data.status : undefined,
+    playbackId: playbackId ?? null,
+    recentAssetId,
+    streamKey: typeof data?.stream_key === 'string' ? data.stream_key : null,
+    createdAt: typeof data?.created_at === 'string' ? data.created_at : undefined,
+  }
+}
+
+async function handleCreateLiveStream(
+  tokenId: string,
+  tokenSecret: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const reconnectWindowSeconds =
+    typeof body.reconnect_window_seconds === 'number' && Number.isFinite(body.reconnect_window_seconds)
+      ? Math.min(300, Math.max(30, Math.round(body.reconnect_window_seconds)))
+      : 90
+  const passthrough = typeof body.passthrough === 'string' ? body.passthrough.trim() : ''
+  // Mux rejects `new_asset_settings.passthrough`; root-level `passthrough` is copied to the live stream and its assets.
+  const payload = {
+    playback_policies: ['public'],
+    new_asset_settings: {
+      playback_policies: ['public'],
+    },
+    latency_mode: normalizeLiveLatencyMode(body.latency_mode),
+    reconnect_window: reconnectWindowSeconds,
+    ...(passthrough ? { passthrough } : {}),
+  }
+  const res = await muxFetch(tokenId, tokenSecret, '/video/v1/live-streams', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  const parsed = (await res.json().catch(() => ({}))) as Record<string, unknown>
+  if (!res.ok) {
+    const err = formatMuxApiErrorMessage(parsed, res.status)
+    console.warn('[mux] create_live_stream Mux HTTP', res.status, err)
+    return jsonResponse({ ok: false, error: err }, 502)
+  }
+  const dataRaw = (parsed as MuxEnvelope<Record<string, unknown>>).data
+  const summary = liveStreamSummaryFromMuxData(
+    dataRaw && typeof dataRaw === 'object' && !Array.isArray(dataRaw) ? dataRaw : undefined,
+  )
+  if (!summary.liveStreamId) {
+    return jsonResponse({ ok: false, error: 'Mux did not return a live stream id.' }, 502)
+  }
+  return jsonResponse({
+    ok: true,
+    liveStreamId: summary.liveStreamId,
+    playbackId: summary.playbackId,
+    streamKey: summary.streamKey,
+    status: summary.status,
+  })
+}
+
+async function handleGetLiveStream(
+  tokenId: string,
+  tokenSecret: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const liveStreamId = typeof body.live_stream_id === 'string' ? body.live_stream_id.trim() : ''
+  if (!liveStreamId) {
+    return jsonResponse({ ok: false, error: 'live_stream_id is required.' }, 400)
+  }
+  const res = await muxFetch(tokenId, tokenSecret, `/video/v1/live-streams/${encodeURIComponent(liveStreamId)}`)
+  const parsed = (await res.json().catch(() => ({}))) as Record<string, unknown>
+  if (!res.ok) {
+    const err = formatMuxApiErrorMessage(parsed, res.status)
+    console.warn('[mux] get_live_stream Mux HTTP', res.status, err)
+    return jsonResponse({ ok: false, error: err }, 502)
+  }
+  const dataRaw = (parsed as MuxEnvelope<Record<string, unknown>>).data
+  const summary = liveStreamSummaryFromMuxData(
+    dataRaw && typeof dataRaw === 'object' && !Array.isArray(dataRaw) ? dataRaw : undefined,
+  )
+  return jsonResponse({
+    ok: true,
+    liveStreamId: summary.liveStreamId || liveStreamId,
+    status: summary.status,
+    playbackId: summary.playbackId,
+    recentAssetId: summary.recentAssetId,
+    createdAt: summary.createdAt,
+  })
+}
+
+async function handleListLiveStreams(
+  tokenId: string,
+  tokenSecret: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const limit =
+    typeof body.limit === 'number' && Number.isFinite(body.limit) ? Math.max(1, Math.min(50, Math.round(body.limit))) : 20
+  const res = await muxFetch(tokenId, tokenSecret, `/video/v1/live-streams?limit=${limit}`)
+  const parsed = (await res.json().catch(() => ({}))) as Record<string, unknown>
+  if (!res.ok) {
+    const err = formatMuxApiErrorMessage(parsed, res.status)
+    console.warn('[mux] list_live_streams Mux HTTP', res.status, err)
+    return jsonResponse({ ok: false, error: err }, 502)
+  }
+  const envelope = parsed as MuxEnvelope<unknown>
+  const list = Array.isArray(envelope.data) ? envelope.data : []
+  const streams = list
+    .map((entry) =>
+      liveStreamSummaryFromMuxData(
+        entry && typeof entry === 'object' && !Array.isArray(entry) ? (entry as Record<string, unknown>) : undefined,
+      ),
+    )
+    .filter((entry) => entry.liveStreamId.length > 0)
+    .map((entry) => ({
+      liveStreamId: entry.liveStreamId,
+      status: entry.status,
+      playbackId: entry.playbackId,
+      recentAssetId: entry.recentAssetId,
+      createdAt: entry.createdAt,
+    }))
+  return jsonResponse({ ok: true, streams })
+}
+
+async function getSupabaseServiceClient() {
+  const url = Deno.env.get('SUPABASE_URL')
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  if (!url || !serviceKey) return null
+  const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2.49.1')
+  return createClient(url, serviceKey)
+}
+
+async function loadCourseRowFromSupabase(courseId: string): Promise<Record<string, unknown> | null> {
+  const sb = await getSupabaseServiceClient()
+  if (!sb) return null
+  const { data, error } = await sb.from(ACADEMY_COURSES_TABLE).select('data').eq('id', courseId).maybeSingle()
+  if (error) {
+    console.warn('[mux] course row read failed', error.message)
+    return null
+  }
+  const row = data?.data
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return null
+  return row as Record<string, unknown>
+}
+
+async function saveCourseRowToSupabase(courseId: string, payload: Record<string, unknown>): Promise<void> {
+  const sb = await getSupabaseServiceClient()
+  if (!sb) return
+  const { error } = await sb.from(ACADEMY_COURSES_TABLE).upsert(
+    {
+      id: courseId,
+      data: payload,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'id' },
+  )
+  if (error) {
+    console.warn('[mux] course row upsert failed', error.message)
+  }
+}
+
+async function loadRuntimeStateRowFromSupabase(): Promise<Record<string, unknown> | null> {
+  const sb = await getSupabaseServiceClient()
+  if (!sb) return null
+  const { data, error } = await sb
+    .from(ACADEMY_COURSES_TABLE)
+    .select('data')
+    .eq('id', RUNTIME_STATE_ROW_ID)
+    .maybeSingle()
+  if (error) {
+    console.warn('[mux] runtime row read failed', error.message)
+    return null
+  }
+  const runtime = data?.data
+  if (!runtime || typeof runtime !== 'object' || Array.isArray(runtime)) return null
+  return runtime as Record<string, unknown>
+}
+
+async function loadRehearsalRowFromSupabase(): Promise<Record<string, unknown> | null> {
+  const sb = await getSupabaseServiceClient()
+  if (!sb) return null
+  const { data, error } = await sb
+    .from(ACADEMY_COURSES_TABLE)
+    .select('data')
+    .eq('id', LIVE_REHEARSAL_ROW_ID)
+    .maybeSingle()
+  if (error) {
+    console.warn('[mux] rehearsal row read failed', error.message)
+    return null
+  }
+  const row = data?.data
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return null
+  return row as Record<string, unknown>
+}
+
+async function saveRehearsalRowToSupabase(payload: Record<string, unknown>): Promise<void> {
+  const sb = await getSupabaseServiceClient()
+  if (!sb) return
+  const { error } = await sb.from(ACADEMY_COURSES_TABLE).upsert(
+    {
+      id: LIVE_REHEARSAL_ROW_ID,
+      data: payload,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'id' },
+  )
+  if (error) {
+    console.warn('[mux] rehearsal row upsert failed', error.message)
+  }
+}
+
+async function handleGetOrCreateRehearsalStream(
+  tokenId: string,
+  tokenSecret: string,
+): Promise<Response> {
+  const existing = await loadRehearsalRowFromSupabase()
+  const storedLiveStreamId = typeof existing?.muxLiveStreamId === 'string' ? existing.muxLiveStreamId.trim() : ''
+  if (storedLiveStreamId) {
+    const current = await handleGetLiveStream(tokenId, tokenSecret, { live_stream_id: storedLiveStreamId })
+    if (current.status < 400) {
+      const json = (await current.json()) as Record<string, unknown>
+      return jsonResponse({
+        ok: true,
+        liveStreamId: typeof json.liveStreamId === 'string' ? json.liveStreamId : storedLiveStreamId,
+        playbackId: typeof json.playbackId === 'string' ? json.playbackId : null,
+        streamKey: typeof existing?.muxStreamKey === 'string' ? existing.muxStreamKey : null,
+      })
+    }
+  }
+
+  const created = await handleCreateLiveStream(tokenId, tokenSecret, {
+    title: 'Presenter rehearsal stream',
+    latency_mode: 'low',
+    reconnect_window_seconds: 120,
+    passthrough: 'rehearsal:persistent',
+  })
+  if (created.status >= 400) return created
+  const json = (await created.json()) as Record<string, unknown>
+  const liveStreamId = typeof json.liveStreamId === 'string' ? json.liveStreamId : ''
+  if (!liveStreamId) {
+    return jsonResponse({ ok: false, error: 'Could not persist rehearsal stream.' }, 502)
+  }
+  await saveRehearsalRowToSupabase({
+    id: LIVE_REHEARSAL_ROW_ID,
+    title: 'Presenter rehearsal stream',
+    guidance:
+      'Use this stream to verify camera, microphone, and share quality before any learner-facing broadcast.',
+    muxLiveStreamId: liveStreamId,
+    muxPlaybackId: typeof json.playbackId === 'string' ? json.playbackId : '',
+    muxStreamKey: typeof json.streamKey === 'string' ? json.streamKey : '',
+    updatedAt: new Date().toISOString(),
+  })
+  return jsonResponse({
+    ok: true,
+    liveStreamId,
+    playbackId: typeof json.playbackId === 'string' ? json.playbackId : null,
+    streamKey: typeof json.streamKey === 'string' ? json.streamKey : null,
+  })
+}
+
+function createDraftCourseDocument(options: {
+  id: string
+  title: string
+  description: string
+  summary: string
+  category: string
+  topic: string
+  level: 'beginner' | 'intermediate' | 'advanced'
+  audience: 'internal' | 'everyone'
+  instructorId: string
+  minutes: number
+  muxAssetId: string
+  muxPlaybackId: string
+  sourceOccurrenceId?: string
+}) {
+  const now = new Date().toISOString()
+  return {
+    id: options.id,
+    title: options.title,
+    summary: options.summary,
+    description: options.description,
+    category: options.category,
+    topic: options.topic,
+    level: options.level,
+    audience: options.audience,
+    instructorId: options.instructorId,
+    status: 'draft',
+    videoMinutes: options.minutes,
+    muxAssetId: options.muxAssetId,
+    muxPlaybackId: options.muxPlaybackId,
+    muxStatus: 'ready',
+    transcriptStatus: 'idle',
+    cpdHoursOverride: null,
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+    packageProfile: {
+      schemaVersion: 1,
+      locale: 'en-US',
+      runtimeMode: 'single_sco',
+      mediaDelivery: 'stream',
+      manifestIdentifier: options.id,
+    },
+    activityOutline: [
+      { id: `${options.id}-video`, title: 'Watch replay', type: 'video_assessment', required: true },
+      { id: `${options.id}-quiz`, title: 'Complete assessment quiz', type: 'resource', required: true },
+    ],
+    quiz: [],
+    quizPolicy: {
+      passThreshold: 80,
+      shownQuestionCount: 10,
+      generatedQuestionCount: 20,
+      minutesBasis: options.minutes,
+      generatedAt: now,
+    },
+    sourceLiveOccurrenceId: options.sourceOccurrenceId ?? null,
+  }
+}
+
+function normalizedAudience(value: unknown): 'internal' | 'everyone' {
+  return value === 'internal' ? 'internal' : 'everyone'
+}
+
+function sanitizedCourseIdSuffix(raw: string): string {
+  const normalized = raw.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
+  if (!normalized) return 'occurrence'
+  return normalized.slice(0, 48)
+}
+
+function pickLiveOccurrenceFromRuntime(runtime: Record<string, unknown> | null, occurrenceId: string): Record<string, unknown> | null {
+  if (!runtime) return null
+  const occurrences = Array.isArray(runtime.liveOccurrences) ? runtime.liveOccurrences : []
+  for (const entry of occurrences) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const typed = entry as Record<string, unknown>
+    if (typed.id === occurrenceId) return typed
+  }
+  return null
+}
+
+function pickOccurrenceIdByLiveStreamId(
+  runtime: Record<string, unknown> | null,
+  liveStreamId: string,
+): string | null {
+  if (!runtime || !liveStreamId.trim()) return null
+  const occurrences = Array.isArray(runtime.liveOccurrences) ? runtime.liveOccurrences : []
+  for (const entry of occurrences) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const typed = entry as Record<string, unknown>
+    const candidateId = typeof typed.id === 'string' ? typed.id.trim() : ''
+    const candidateLiveStreamId =
+      typeof typed.muxLiveStreamId === 'string' ? typed.muxLiveStreamId.trim() : ''
+    if (!candidateId || !candidateLiveStreamId) continue
+    if (candidateLiveStreamId === liveStreamId.trim()) return candidateId
+  }
+  return null
+}
+
+async function handleCreateCourseFromLiveAsset(body: Record<string, unknown>): Promise<Response> {
+  const assetId = typeof body.asset_id === 'string' ? body.asset_id.trim() : ''
+  const playbackId = typeof body.playback_id === 'string' ? body.playback_id.trim() : ''
+  if (!assetId || !playbackId) {
+    return jsonResponse({ ok: false, error: 'asset_id and playback_id are required.' }, 400)
+  }
+  const sourceOccurrenceId =
+    typeof body.source_occurrence_id === 'string' ? body.source_occurrence_id.trim() : ''
+  const runtime = sourceOccurrenceId ? await loadRuntimeStateRowFromSupabase() : null
+  const runtimeOccurrence = sourceOccurrenceId ? pickLiveOccurrenceFromRuntime(runtime, sourceOccurrenceId) : null
+  const title =
+    (typeof body.title === 'string' && body.title.trim())
+    || (typeof runtimeOccurrence?.title === 'string' && runtimeOccurrence.title.trim())
+    || 'Live session replay'
+  const description = (typeof body.description === 'string' && body.description.trim())
+    || (typeof runtimeOccurrence?.description === 'string' && runtimeOccurrence.description.trim())
+    || 'Replay generated from a live professional development session.'
+  const summary = `Replay from live session held on ${new Date().toLocaleDateString('en-CA')}.`
+  const topicRaw = typeof body.topic === 'string' ? body.topic.trim() : ''
+  const topic = COURSE_TOPIC_VALUES.includes(topicRaw as (typeof COURSE_TOPIC_VALUES)[number]) ? topicRaw : 'Leadership'
+  const levelRaw = typeof body.level === 'string' ? body.level.trim() : ''
+  const level: 'beginner' | 'intermediate' | 'advanced' =
+    levelRaw === 'beginner' || levelRaw === 'advanced' ? levelRaw : 'intermediate'
+  const minutes =
+    typeof body.course_minutes === 'number' && Number.isFinite(body.course_minutes)
+      ? Math.max(1, Math.round(body.course_minutes))
+      : typeof runtimeOccurrence?.expectedMinutes === 'number' && Number.isFinite(runtimeOccurrence.expectedMinutes)
+        ? Math.max(1, Math.round(runtimeOccurrence.expectedMinutes))
+      : 60
+  const courseId = typeof body.course_id === 'string' && body.course_id.trim()
+    ? body.course_id.trim()
+    : sourceOccurrenceId
+      ? `crs-live-${sanitizedCourseIdSuffix(sourceOccurrenceId)}`
+      : `crs-live-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
+  const audience = normalizedAudience(body.audience ?? runtimeOccurrence?.audience)
+  const instructorId = typeof body.instructor_id === 'string' && body.instructor_id.trim()
+    ? body.instructor_id.trim()
+    : Array.isArray(runtimeOccurrence?.presenterUserIds) && typeof runtimeOccurrence.presenterUserIds[0] === 'string'
+      ? runtimeOccurrence.presenterUserIds[0]
+      : 'u-instructor-1'
+
+  const courseData = createDraftCourseDocument({
+    id: courseId,
+    title,
+    description,
+    summary,
+    category: 'General',
+    topic,
+    level,
+    audience,
+    instructorId,
+    minutes,
+    muxAssetId: assetId,
+    muxPlaybackId: playbackId,
+    sourceOccurrenceId: sourceOccurrenceId || undefined,
+  })
+
+  const sb = await getSupabaseServiceClient()
+  if (!sb) {
+    return jsonResponse(
+      {
+        ok: false,
+        error: 'Supabase service role is required to create a draft course from live recording.',
+      },
+      503,
+    )
+  }
+  const { error } = await sb.from(ACADEMY_COURSES_TABLE).upsert(
+    {
+      id: courseId,
+      data: courseData,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'id' },
+  )
+  if (error) {
+    console.error('[mux] create_course_from_live_asset upsert failed', error)
+    return jsonResponse({ ok: false, error: 'Could not save draft course to Supabase.' }, 502)
+  }
+
+  return jsonResponse({
+    ok: true,
+    courseId,
+    title: courseData.title,
+    summary: courseData.summary,
+    description: courseData.description,
+    category: courseData.category,
+    topic: courseData.topic,
+    level: courseData.level,
+    status: courseData.status,
+  })
+}
+
+const AUTO_TRANSCRIBE_MAX_BYTES = 25 * 1024 * 1024
+
+function normalizePlaybackId(raw: unknown): string {
+  return typeof raw === 'string' ? raw.trim() : ''
+}
+
+function normalizeAssetId(raw: unknown): string {
+  return typeof raw === 'string' ? raw.trim() : ''
+}
+
+function normalizedTranscriptStatus(raw: unknown): 'idle' | 'processing' | 'ready' | 'error' {
+  if (raw === 'processing' || raw === 'ready' || raw === 'error') return raw
+  return 'idle'
+}
+
+function transcriptCandidateUrls(playbackId: string): string[] {
+  const base = `https://stream.mux.com/${encodeURIComponent(playbackId)}`
+  return [`${base}/audio.m4a`, `${base}/audio.mp3`, `${base}/low.mp4`, `${base}/medium.mp4`]
+}
+
+async function downloadPlaybackFileForTranscription(
+  playbackId: string,
+): Promise<
+  | { ok: true; file: File; sourceUrl: string }
+  | { ok: false; reason: string }
+> {
+  const urls = transcriptCandidateUrls(playbackId)
+  const rejectionReasons: string[] = []
+
+  for (const url of urls) {
+    let response: Response
+    try {
+      response = await fetch(url, { method: 'GET' })
+    } catch (e) {
+      rejectionReasons.push(`${url} network error`)
+      continue
+    }
+    if (!response.ok || !response.body) {
+      rejectionReasons.push(`${url} returned HTTP ${response.status}`)
+      continue
+    }
+    const contentType = response.headers.get('content-type')?.toLowerCase() ?? 'application/octet-stream'
+    const contentLengthRaw = Number(response.headers.get('content-length') ?? '0')
+    if (Number.isFinite(contentLengthRaw) && contentLengthRaw > AUTO_TRANSCRIBE_MAX_BYTES) {
+      rejectionReasons.push(`${url} too large (${Math.round(contentLengthRaw / (1024 * 1024))} MB)`)
+      continue
+    }
+
+    const reader = response.body.getReader()
+    const chunks: Uint8Array[] = []
+    let total = 0
+    let exceededLimit = false
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (value) {
+        total += value.byteLength
+        if (total > AUTO_TRANSCRIBE_MAX_BYTES) {
+          exceededLimit = true
+          break
+        }
+        chunks.push(value)
+      }
+    }
+    reader.releaseLock()
+    if (exceededLimit || total <= 0) {
+      rejectionReasons.push(
+        exceededLimit
+          ? `${url} exceeded 25 MB transcription limit`
+          : `${url} produced an empty payload`,
+      )
+      continue
+    }
+
+    const ext = url.endsWith('.mp3') ? 'mp3' : url.endsWith('.m4a') ? 'm4a' : 'mp4'
+    const file = new File(chunks, `live-replay.${ext}`, { type: contentType })
+    return { ok: true, file, sourceUrl: url }
+  }
+
+  return {
+    ok: false,
+    reason: `Could not download a playback file suitable for transcription. Tried: ${rejectionReasons.join('; ')}`,
+  }
+}
+
+async function autoTranscribeLiveCourse(options: {
+  courseId: string
+  playbackId: string
+  assetId: string
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const course = await loadCourseRowFromSupabase(options.courseId)
+  if (!course) {
+    return { ok: false, error: 'Draft course was not found for transcript generation.' }
+  }
+  const currentStatus = normalizedTranscriptStatus(course.transcriptStatus)
+  if (currentStatus === 'ready') {
+    return { ok: true }
+  }
+
+  await saveCourseRowToSupabase(options.courseId, {
+    ...course,
+    transcriptStatus: 'processing',
+    transcriptErrorMessage: null,
+    muxAssetId: options.assetId,
+    muxPlaybackId: options.playbackId,
+    updatedAt: new Date().toISOString(),
+  })
+
+  const download = await downloadPlaybackFileForTranscription(options.playbackId)
+  if (!download.ok) {
+    await saveCourseRowToSupabase(options.courseId, {
+      ...course,
+      transcriptStatus: 'error',
+      transcriptErrorMessage: download.reason,
+      updatedAt: new Date().toISOString(),
+    })
+    return { ok: false, error: download.reason }
+  }
+
+  const openAiApiKey = Deno.env.get('OPENAI_API_KEY')
+  if (!openAiApiKey) {
+    const err = 'OpenAI is not configured (missing OPENAI_API_KEY).'
+    await saveCourseRowToSupabase(options.courseId, {
+      ...course,
+      transcriptStatus: 'error',
+      transcriptErrorMessage: err,
+      updatedAt: new Date().toISOString(),
+    })
+    return { ok: false, error: err }
+  }
+
+  const model = Deno.env.get('OPENAI_TRANSCRIBE_MODEL')?.trim() || 'gpt-4o-mini-transcribe'
+  const firstAttempt = await openAiTranscribe(openAiApiKey, download.file, model, '')
+  const result =
+    firstAttempt.ok
+      ? firstAttempt
+      : shouldRetryTranscriptionWithFallback(
+          firstAttempt.error,
+          model,
+          Deno.env.get('OPENAI_TRANSCRIBE_FALLBACK_MODEL')?.trim() || 'whisper-1',
+        )
+        ? await openAiTranscribe(
+            openAiApiKey,
+            download.file,
+            Deno.env.get('OPENAI_TRANSCRIBE_FALLBACK_MODEL')?.trim() || 'whisper-1',
+            '',
+          )
+        : firstAttempt
+
+  if (!result.ok) {
+    await saveCourseRowToSupabase(options.courseId, {
+      ...course,
+      transcriptStatus: 'error',
+      transcriptErrorMessage: result.error,
+      updatedAt: new Date().toISOString(),
+    })
+    return { ok: false, error: result.error }
+  }
+
+  await saveCourseRowToSupabase(options.courseId, {
+    ...course,
+    transcript: result.transcript,
+    transcriptText: result.text,
+    transcriptStatus: 'ready',
+    transcriptErrorMessage: null,
+    updatedAt: new Date().toISOString(),
+  })
+  return { ok: true }
+}
+
+async function handleAutoTranscribeLiveRequest(request: Request): Promise<Response> {
+  if (request.method !== 'POST') {
+    return jsonResponse({ ok: false, error: 'Method not allowed.' }, 405)
+  }
+  const internalToken = request.headers.get('x-mux-internal-token')?.trim() ?? ''
+  const expectedToken = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim() ?? ''
+  if (!internalToken || !expectedToken || !timingSafeEqualString(internalToken, expectedToken)) {
+    return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
+  }
+
+  let body: Record<string, unknown> = {}
+  try {
+    body = (await request.json()) as Record<string, unknown>
+  } catch {
+    return jsonResponse({ ok: false, error: 'Invalid request body.' }, 400)
+  }
+
+  const courseId = typeof body.course_id === 'string' ? body.course_id.trim() : ''
+  const playbackId = normalizePlaybackId(body.playback_id)
+  const assetId = normalizeAssetId(body.asset_id)
+  if (!courseId || !playbackId || !assetId) {
+    return jsonResponse({ ok: false, error: 'course_id, playback_id, and asset_id are required.' }, 400)
+  }
+
+  const started = await autoTranscribeLiveCourse({ courseId, playbackId, assetId })
+  if (!started.ok) {
+    return jsonResponse({ ok: false, error: started.error }, 502)
+  }
+  return jsonResponse({ ok: true })
+}
+
+function parseMuxSignatureHeader(header: string): { timestamp: string; signatures: string[] } | null {
+  const entries = header
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+  let timestamp = ''
+  const signatures: string[] = []
+  for (const entry of entries) {
+    const [key, value] = entry.split('=')
+    if (!key || !value) continue
+    if (key === 't') timestamp = value
+    if (key === 'v1' && value.trim()) signatures.push(value.trim())
+  }
+  return timestamp && signatures.length > 0 ? { timestamp, signatures } : null
+}
+
+async function computeHmacSha256Hex(secret: string, value: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  )
+  const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(value))
+  return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function timingSafeEqualString(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let mismatch = 0
+  for (let i = 0; i < a.length; i += 1) {
+    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  }
+  return mismatch === 0
+}
+
+async function muxWebhookSignatureIsValid(request: Request, rawBody: string): Promise<boolean> {
+  const secret = Deno.env.get('MUX_WEBHOOK_SIGNING_SECRET')
+  if (!secret) return true
+  const signatureHeader = request.headers.get('mux-signature')?.trim()
+  if (!signatureHeader) return false
+  const parsed = parseMuxSignatureHeader(signatureHeader)
+  if (!parsed) return false
+  const timestampSeconds = Number(parsed.timestamp)
+  if (!Number.isFinite(timestampSeconds) || timestampSeconds <= 0) return false
+  const toleranceSecondsRaw = Number(Deno.env.get('MUX_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS') ?? '300')
+  const toleranceSeconds =
+    Number.isFinite(toleranceSecondsRaw) && toleranceSecondsRaw > 0 ? toleranceSecondsRaw : 300
+  const nowSeconds = Math.floor(Date.now() / 1000)
+  if (Math.abs(nowSeconds - Math.floor(timestampSeconds)) > toleranceSeconds) {
+    return false
+  }
+  const expected = await computeHmacSha256Hex(secret, `${parsed.timestamp}.${rawBody}`)
+  return parsed.signatures.some((candidate) => timingSafeEqualString(expected, candidate))
+}
+
+async function updateLiveOccurrenceRuntimeForAsset(options: {
+  occurrenceId: string
+  assetId: string
+  playbackId: string
+  durationSeconds: number | null
+  courseId: string
+}) {
+  const typed = await loadRuntimeStateRowFromSupabase()
+  if (!typed) return
+  const occurrences = Array.isArray(typed.liveOccurrences) ? typed.liveOccurrences : []
+  let foundOccurrence = false
+  const updatedOccurrences = occurrences.map((entry) => {
+    if (!entry || typeof entry !== 'object') return entry
+    const o = entry as Record<string, unknown>
+    if (o.id !== options.occurrenceId) return entry
+    foundOccurrence = true
+    const expectedMinutes =
+      options.durationSeconds != null && Number.isFinite(options.durationSeconds) && options.durationSeconds > 0
+        ? Math.max(1, Math.round(options.durationSeconds / 60))
+        : typeof o.expectedMinutes === 'number'
+          ? Math.max(1, Math.round(o.expectedMinutes))
+          : 60
+    return {
+      ...o,
+      status: 'ended',
+      conversionStatus: 'draft_created',
+      muxAssetId: options.assetId,
+      muxPlaybackId: options.playbackId,
+      expectedMinutes,
+      resultingCourseId: options.courseId,
+      muxErrorMessage: '',
+    }
+  })
+  if (!foundOccurrence) {
+    return
+  }
+  const nextRuntime = {
+    ...typed,
+    liveOccurrences: updatedOccurrences,
+  }
+  const sb = await getSupabaseServiceClient()
+  if (!sb) return
+  const { error: saveError } = await sb.from(ACADEMY_COURSES_TABLE).upsert(
+    {
+      id: RUNTIME_STATE_ROW_ID,
+      data: nextRuntime,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'id' },
+  )
+  if (saveError) {
+    console.warn('[mux webhook] runtime row upsert failed', saveError.message)
+  }
+}
+
+async function triggerAutoTranscribeFromWebhook(options: {
+  requestUrl: string
+  courseId: string
+  assetId: string
+  playbackId: string
+}) {
+  const internalToken = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim() ?? ''
+  if (!internalToken) {
+    console.warn('[mux webhook] skipping auto-transcribe trigger (missing service role key)')
+    return
+  }
+  const autoUrl = new URL(options.requestUrl)
+  autoUrl.pathname = autoUrl.pathname.replace(/\/webhook$/, '/auto-transcribe-live')
+  try {
+    const response = await fetch(autoUrl.toString(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-mux-internal-token': internalToken,
+      },
+      body: JSON.stringify({
+        course_id: options.courseId,
+        asset_id: options.assetId,
+        playback_id: options.playbackId,
+      }),
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      console.warn('[mux webhook] auto-transcribe trigger failed', response.status, text.slice(0, 300))
+    }
+  } catch (e) {
+    console.warn('[mux webhook] auto-transcribe trigger error', e instanceof Error ? e.message : e)
+  }
+}
+
+async function handleMuxWebhook(request: Request): Promise<Response> {
+  const rawBody = await request.text()
+  const validSig = await muxWebhookSignatureIsValid(request, rawBody)
+  if (!validSig) {
+    return jsonResponse({ ok: false, error: 'Invalid Mux webhook signature.' }, 401)
+  }
+
+  let payload: Record<string, unknown> = {}
+  try {
+    payload = rawBody ? (JSON.parse(rawBody) as Record<string, unknown>) : {}
+  } catch {
+    return jsonResponse({ ok: false, error: 'Invalid webhook payload.' }, 400)
+  }
+  const eventType = typeof payload.type === 'string' ? payload.type : ''
+  const eventId = typeof payload.id === 'string' ? payload.id : ''
+  const eventData =
+    payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data)
+      ? (payload.data as Record<string, unknown>)
+      : {}
+  if (eventType !== 'video.asset.ready') {
+    return jsonResponse({ ok: true, ignored: true, eventType })
+  }
+
+  const assetId = typeof eventData.id === 'string' ? eventData.id.trim() : ''
+  const playbackRaw = Array.isArray(eventData.playback_ids) ? eventData.playback_ids : []
+  const playbackFirst =
+    playbackRaw[0] && typeof playbackRaw[0] === 'object' && !Array.isArray(playbackRaw[0])
+      ? (playbackRaw[0] as Record<string, unknown>)
+      : null
+  const playbackId = typeof playbackFirst?.id === 'string' ? playbackFirst.id.trim() : ''
+  const passthrough = typeof eventData.passthrough === 'string' ? eventData.passthrough.trim() : ''
+  const muxLiveStreamId = typeof eventData.live_stream_id === 'string' ? eventData.live_stream_id.trim() : ''
+  if (!assetId || !playbackId) {
+    return jsonResponse({ ok: true, ignored: true, reason: 'missing_asset_or_playback_id' })
+  }
+
+  const runtime = await loadRuntimeStateRowFromSupabase()
+  const occurrenceIdFromPassthrough = passthrough.startsWith('live_occurrence:')
+    ? passthrough.slice('live_occurrence:'.length).trim()
+    : ''
+  const occurrenceIdFromLiveStream = muxLiveStreamId
+    ? pickOccurrenceIdByLiveStreamId(runtime, muxLiveStreamId)
+    : null
+  const occurrenceId = occurrenceIdFromPassthrough || occurrenceIdFromLiveStream || ''
+  if (!occurrenceId) {
+    return jsonResponse({
+      ok: true,
+      ignored: true,
+      reason: 'missing_occurrence_id',
+      hasPassthrough: Boolean(occurrenceIdFromPassthrough),
+      hasLiveStreamId: Boolean(muxLiveStreamId),
+    })
+  }
+
+  const createCourseResponse = await handleCreateCourseFromLiveAsset({
+    course_id: `crs-live-${sanitizedCourseIdSuffix(occurrenceId)}`,
+    course_minutes:
+      typeof eventData.duration === 'number' && Number.isFinite(eventData.duration) ? Math.max(1, Math.round(eventData.duration / 60)) : 60,
+    asset_id: assetId,
+    playback_id: playbackId,
+    source_occurrence_id: occurrenceId,
+  })
+  if (createCourseResponse.status >= 400) {
+    const failure = (await createCourseResponse.json().catch(() => ({}))) as Record<string, unknown>
+    return jsonResponse(
+      {
+        ok: false,
+        error: failure.error ?? 'Could not auto-create course from webhook.',
+        eventId,
+        occurrenceId,
+      },
+      502,
+    )
+  }
+  const created = (await createCourseResponse.json()) as Record<string, unknown>
+  const courseId = typeof created.courseId === 'string' ? created.courseId : ''
+  if (courseId) {
+    const durationSeconds =
+      typeof eventData.duration === 'number' && Number.isFinite(eventData.duration) ? eventData.duration : null
+    await updateLiveOccurrenceRuntimeForAsset({
+      occurrenceId,
+      assetId,
+      playbackId,
+      durationSeconds,
+      courseId,
+    })
+    void triggerAutoTranscribeFromWebhook({
+      requestUrl: request.url,
+      courseId,
+      assetId,
+      playbackId,
+    })
+  }
+  return jsonResponse({ ok: true, eventType, eventId, courseId, occurrenceId })
 }
 
 async function courseOwnsMuxAsset(

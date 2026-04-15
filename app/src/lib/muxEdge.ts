@@ -310,6 +310,104 @@ export async function getMuxAsset(assetId: string): Promise<{
   }
 }
 
+export type MuxLiveLatencyMode = 'low' | 'standard'
+
+export async function createMuxLiveStream(options?: {
+  title?: string
+  latencyMode?: MuxLiveLatencyMode
+  reconnectWindowSeconds?: number
+  passthrough?: string
+}): Promise<{
+  liveStreamId: string
+  playbackId: string | null
+  streamKey: string | null
+  status?: string
+}> {
+  const json = await muxEdgePost({
+    action: 'create_live_stream',
+    title: options?.title ?? '',
+    latency_mode: options?.latencyMode ?? 'low',
+    reconnect_window_seconds: options?.reconnectWindowSeconds ?? 60,
+    passthrough: options?.passthrough ?? '',
+  })
+  if (json.ok !== true || typeof json.liveStreamId !== 'string') {
+    throw new Error(typeof json.error === 'string' ? json.error : 'Could not create a live stream.')
+  }
+  return {
+    liveStreamId: json.liveStreamId,
+    playbackId: typeof json.playbackId === 'string' ? json.playbackId : null,
+    streamKey: typeof json.streamKey === 'string' ? json.streamKey : null,
+    status: typeof json.status === 'string' ? json.status : undefined,
+  }
+}
+
+export async function getMuxLiveStream(liveStreamId: string): Promise<{
+  liveStreamId: string
+  status?: string
+  playbackId: string | null
+  recentAssetId: string | null
+}> {
+  const json = await muxEdgePost({ action: 'get_live_stream', live_stream_id: liveStreamId })
+  if (json.ok !== true) {
+    throw new Error(typeof json.error === 'string' ? json.error : 'Could not read live stream status.')
+  }
+  return {
+    liveStreamId:
+      typeof json.liveStreamId === 'string' && json.liveStreamId.trim()
+        ? json.liveStreamId
+        : liveStreamId,
+    status: typeof json.status === 'string' ? json.status : undefined,
+    playbackId: typeof json.playbackId === 'string' ? json.playbackId : null,
+    recentAssetId: typeof json.recentAssetId === 'string' ? json.recentAssetId : null,
+  }
+}
+
+export type MuxLiveStreamSummary = {
+  liveStreamId: string
+  status?: string
+  playbackId: string | null
+  recentAssetId: string | null
+  createdAt?: string
+}
+
+export async function listMuxLiveStreams(limit = 20): Promise<MuxLiveStreamSummary[]> {
+  const json = await muxEdgePost({ action: 'list_live_streams', limit })
+  if (json.ok !== true || !Array.isArray(json.streams)) {
+    throw new Error(typeof json.error === 'string' ? json.error : 'Could not load live streams.')
+  }
+  const streams: MuxLiveStreamSummary[] = []
+  for (const entry of json.streams) {
+    if (!entry || typeof entry !== 'object') continue
+    const typed = entry as Record<string, unknown>
+    const liveStreamId = typeof typed.liveStreamId === 'string' ? typed.liveStreamId.trim() : ''
+    if (!liveStreamId) continue
+    streams.push({
+      liveStreamId,
+      status: typeof typed.status === 'string' ? typed.status : undefined,
+      playbackId: typeof typed.playbackId === 'string' ? typed.playbackId : null,
+      recentAssetId: typeof typed.recentAssetId === 'string' ? typed.recentAssetId : null,
+      createdAt: typeof typed.createdAt === 'string' ? typed.createdAt : undefined,
+    })
+  }
+  return streams
+}
+
+export async function getOrCreateMuxRehearsalStream(): Promise<{
+  liveStreamId: string
+  playbackId: string | null
+  streamKey: string | null
+}> {
+  const json = await muxEdgePost({ action: 'get_or_create_rehearsal_stream' })
+  if (json.ok !== true || typeof json.liveStreamId !== 'string') {
+    throw new Error(typeof json.error === 'string' ? json.error : 'Could not provision rehearsal stream.')
+  }
+  return {
+    liveStreamId: json.liveStreamId,
+    playbackId: typeof json.playbackId === 'string' ? json.playbackId : null,
+    streamKey: typeof json.streamKey === 'string' ? json.streamKey : null,
+  }
+}
+
 export type MuxByteUploadProgress = {
   loaded: number
   total: number

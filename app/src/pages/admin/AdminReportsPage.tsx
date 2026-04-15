@@ -7,7 +7,7 @@ export function AdminReportsPage() {
     {
       eyebrow: 'Snapshot',
       title: 'Operational KPIs',
-      description: 'Usage, compliance, and webinar pipeline in one top-level view.',
+      description: 'Usage, compliance, and live-session pipeline in one top-level view.',
       meta: `${snapshot.totalUsers} users · ${snapshot.totalCompletions} completions · ${snapshot.cpdLedgerEntries} ledger entries`,
       to: '/admin/reports/snapshot',
       cta: 'Open snapshot report',

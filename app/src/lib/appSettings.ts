@@ -46,6 +46,12 @@ function trimEnv(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+/** When true, runtime can operate from build-time `VITE_*` without `/app-settings.json`. */
+function hasInlineBrowserConfigFromVite(): boolean {
+  const env = import.meta.env
+  return Boolean(trimEnv(env.VITE_SUPABASE_URL) && trimEnv(env.VITE_SUPABASE_ANON_KEY))
+}
+
 function normalizeEmailList(list: string[]): string[] {
   const out = new Set<string>()
   for (const item of list) {
@@ -125,18 +131,24 @@ function normalizeAppSettings(raw: unknown): AppSettings {
 }
 
 export async function loadAppSettings(): Promise<AppSettings> {
+  let loadError: unknown = null
   try {
     const response = await fetch('/app-settings.json', { cache: 'no-store' })
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`)
     }
+    const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
+    if (contentType.includes('text/html')) {
+      throw new Error('Expected JSON but received HTML.')
+    }
     cachedSettings = applyViteEnvOverrides(normalizeAppSettings(await response.json()))
   } catch (error) {
+    loadError = error
     cachedSettings = applyViteEnvOverrides({ ...DEFAULT_APP_SETTINGS })
-    if (typeof console !== 'undefined') {
+    if (typeof console !== 'undefined' && !hasInlineBrowserConfigFromVite()) {
       console.warn(
         '[app-settings] Could not load /app-settings.json. Falling back to empty defaults.',
-        error,
+        loadError,
       )
     }
   }

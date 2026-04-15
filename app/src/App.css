@@ -1645,6 +1645,25 @@ th {
   flex-wrap: wrap;
 }
 
+.admin-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--space-3);
+}
+
+.admin-form-grid label {
+  display: grid;
+  gap: 0.45rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.admin-form-grid input,
+.admin-form-grid select,
+.admin-form-grid textarea {
+  width: 100%;
+}
+
 .page--admin,
 .admin-page,
 .page-admin {

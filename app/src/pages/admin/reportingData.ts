@@ -20,7 +20,15 @@ type LearnerProgressRow = {
 }
 
 export function useReportingData() {
-  const { courses, completions, cpdLedger, users, enrollments, webinars, webinarAttendances } = useAppStore()
+  const {
+    courses,
+    completions,
+    cpdLedger,
+    users,
+    enrollments,
+    liveOccurrences,
+    liveOccurrenceAttendances,
+  } = useAppStore()
 
   const completionByCourse = useMemo<CompletionByCourseRow[]>(() => {
     return courses
@@ -66,11 +74,19 @@ export function useReportingData() {
       cpdLedgerEntries: cpdLedger.length,
       hoursAwarded: cpdLedger.reduce((sum, row) => sum + row.hoursAwarded, 0),
       certificatesIssued: completions.length,
-      totalWebinars: webinars.length,
-      attendanceRecords: webinarAttendances.length,
-      convertedWebinars: webinars.filter((webinar) => webinar.convertedCourseId).length,
+      totalLiveOccurrences: liveOccurrences.length,
+      attendanceRecords: liveOccurrenceAttendances.length,
+      convertedOccurrences: liveOccurrences.filter((webinar) => webinar.resultingCourseId).length,
     }
-  }, [users.length, enrollments.length, completions.length, courses.length, cpdLedger, webinars, webinarAttendances.length])
+  }, [
+    users.length,
+    enrollments.length,
+    completions.length,
+    courses.length,
+    cpdLedger,
+    liveOccurrences,
+    liveOccurrenceAttendances.length,
+  ])
 
   return {
     completionByCourse,

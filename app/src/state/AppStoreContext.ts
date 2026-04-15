@@ -5,6 +5,7 @@ import type {
   CourseAudience,
   CourseLevel,
   CoursesSyncStatus,
+  LiveOccurrence,
   CourseStatus,
   CourseTopic,
   Enrollment,
@@ -73,6 +74,15 @@ export interface UpdateCourseInput {
   instructorId?: string
 }
 
+export interface CreateLiveOccurrenceInput {
+  title: string
+  description: string
+  startAt: string
+  expectedMinutes: number
+  audience: CourseAudience
+  presenterUserIds?: string[]
+}
+
 export interface AppStoreContextValue extends AppState {
   state: AppState
   currentUserId: string
@@ -83,6 +93,10 @@ export interface AppStoreContextValue extends AppState {
   syncAuthUser: (user: User | null) => void
   issueInvite: (email: string, role: UserRole) => Invite
   inviteUser: (email: string, fullName: string, role: UserRole) => Invite
+  sendInviteEmail: (
+    inviteId: string,
+    options?: { clerkSessionToken?: string | null; signUpUrl?: string | null; invite?: Invite },
+  ) => Promise<ActionResult>
   /** Removes a pending invite so its code can no longer be used. */
   deletePendingInvite: (inviteId: string) => void
   acceptInvite: (code: string) => { ok: true; user: User } | { ok: false; error: string }
@@ -128,7 +142,16 @@ export interface AppStoreContextValue extends AppState {
       >
     >,
   ) => void
-  toggleWebinarAttendance: (webinarId: string) => void
+  createLiveOccurrence: (
+    input: CreateLiveOccurrenceInput,
+  ) => Promise<{ ok: true; occurrence: LiveOccurrence } | { ok: false; message: string }>
+  syncLiveOccurrenceStatus: (occurrenceId: string) => Promise<ActionResult>
+  provisionLiveRehearsalStream: () => Promise<ActionResult>
+  markLiveOccurrenceAttendance: (occurrenceId: string, source?: 'live_manual' | 'replay') => void
+  startLiveOccurrenceWatch: (occurrenceId: string) => void
+  heartbeatLiveOccurrenceWatch: (occurrenceId: string, deltaSeconds: number) => void
+  stopLiveOccurrenceWatch: (occurrenceId: string) => void
+  finalizeLiveOccurrenceAttendance: (occurrenceId: string) => void
   getCourseReadiness: (courseId: string, userId?: string) => ReturnType<typeof evaluateCompletion>
   getActiveEnrollment: (userId: string, courseId: string) => Enrollment | null
   transcriptForCurrentUser: AppState['transcript']
