@@ -10,7 +10,11 @@
     "preview": "vite preview",
     "test": "vitest run --coverage",
     "test:watch": "vitest",
-    "db:push": "node ../scripts/push-supabase-migrations.mjs"
+    "db:push": "node ../scripts/push-supabase-migrations.mjs",
+    "betterbrowse:audit": "betterbrowse audit",
+    "betterbrowse:fix": "betterbrowse fix",
+    "betterbrowse:doctor": "betterbrowse doctor",
+    "betterbrowse:uninstall": "betterbrowse uninstall"
   },
   "dependencies": {
     "@clerk/react": "^6.3.0",

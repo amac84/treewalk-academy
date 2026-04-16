@@ -1,0 +1,34 @@
+{
+  "engine": "playwright",
+  "framework": "react",
+  "baseUrl": "http://localhost:5173",
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1440,
+      "height": 1024
+    },
+    {
+      "name": "mobile",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "routes": [
+    "/"
+  ],
+  "routesFile": ".betterbrowse/routes.json",
+  "writeMode": "diff-only",
+  "styleSystem": {
+    "type": "css",
+    "entryPoints": [
+      "src/index.css"
+    ]
+  },
+  "sourceMap": {
+    "componentRoots": [
+      "src/components",
+      "src/pages"
+    ]
+  }
+}

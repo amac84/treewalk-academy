@@ -1,0 +1,234 @@
+{
+  "version": 1,
+  "generatedAt": "2026-04-15T21:24:25.863Z",
+  "projectRoot": "C:\\Users\\AlexMcAulay\\OneDrive - Treewalk Ventures Inc\\Documents\\Github\\Academy\\treewalkacademy-\\app",
+  "engine": "playwright",
+  "baseUrl": "http://localhost:5173",
+  "routes": [
+    {
+      "route": "/",
+      "viewport": "desktop",
+      "screenshotPath": "C:\\Users\\AlexMcAulay\\OneDrive - Treewalk Ventures Inc\\Documents\\Github\\Academy\\treewalkacademy-\\app\\.betterbrowse\\screenshots\\20260415T212422Z\\root--desktop.png",
+      "consoleMessages": [
+        {
+          "level": "log",
+          "text": "[vite] connecting...",
+          "location": "http://localhost:5173/@vite/client:826"
+        },
+        {
+          "level": "log",
+          "text": "[vite] connected.",
+          "location": "http://localhost:5173/@vite/client:930"
+        },
+        {
+          "level": "log",
+          "text": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold",
+          "location": "http://localhost:5173/node_modules/.vite/deps/client-CrdCuA0L.js?v=cbdd8d17:14337"
+        },
+        {
+          "level": "warning",
+          "text": "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview",
+          "location": "https://beloved-firefly-97.clerk.accounts.dev/npm/@clerk/clerk-js@6/dist/clerk.browser.js:11"
+        }
+      ],
+      "issueIds": [
+        "readability-9ae5ebc5df35",
+        "readability-eff13cbe5021"
+      ]
+    },
+    {
+      "route": "/",
+      "viewport": "mobile",
+      "screenshotPath": "C:\\Users\\AlexMcAulay\\OneDrive - Treewalk Ventures Inc\\Documents\\Github\\Academy\\treewalkacademy-\\app\\.betterbrowse\\screenshots\\20260415T212422Z\\root--mobile.png",
+      "consoleMessages": [
+        {
+          "level": "log",
+          "text": "[vite] connecting...",
+          "location": "http://localhost:5173/@vite/client:826"
+        },
+        {
+          "level": "log",
+          "text": "[vite] connected.",
+          "location": "http://localhost:5173/@vite/client:930"
+        },
+        {
+          "level": "log",
+          "text": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold",
+          "location": "http://localhost:5173/node_modules/.vite/deps/client-CrdCuA0L.js?v=cbdd8d17:14337"
+        },
+        {
+          "level": "warning",
+          "text": "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview",
+          "location": "https://beloved-firefly-97.clerk.accounts.dev/npm/@clerk/clerk-js@6/dist/clerk.browser.js:11"
+        }
+      ],
+      "issueIds": [
+        "readability-6ed8fdc1cc56",
+        "readability-daa352f24d97"
+      ]
+    }
+  ],
+  "consoleSummary": {
+    "errorCount": 0,
+    "warningCount": 1,
+    "pageErrorCount": 0,
+    "messages": [
+      {
+        "level": "log",
+        "text": "[vite] connecting...",
+        "location": "http://localhost:5173/@vite/client:826"
+      },
+      {
+        "level": "log",
+        "text": "[vite] connected.",
+        "location": "http://localhost:5173/@vite/client:930"
+      },
+      {
+        "level": "log",
+        "text": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold",
+        "location": "http://localhost:5173/node_modules/.vite/deps/client-CrdCuA0L.js?v=cbdd8d17:14337"
+      },
+      {
+        "level": "warning",
+        "text": "Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview",
+        "location": "https://beloved-firefly-97.clerk.accounts.dev/npm/@clerk/clerk-js@6/dist/clerk.browser.js:11"
+      }
+    ]
+  },
+  "issues": [
+    {
+      "type": "readability",
+      "severity": "high",
+      "route": "/",
+      "viewport": "mobile",
+      "selector": "body:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(1) > div:nth-of-type(1) > p:nth-of-type(1)",
+      "description": "Text appears too small for comfortable reading at 11.52px.",
+      "evidence": {
+        "screenshot": "C:\\Users\\AlexMcAulay\\OneDrive - Treewalk Ventures Inc\\Documents\\Github\\Academy\\treewalkacademy-\\app\\.betterbrowse\\screenshots\\20260415T212422Z\\root--mobile.png"
+      },
+      "recommendedFix": "Increase font size to at least 12px (and usually 14px+ for body text), especially on mobile viewports.",
+      "confidence": 0.79,
+      "metadata": {
+        "tagName": "p",
+        "classList": [
+          "section-eyebrow"
+        ],
+        "elementText": "INVITE-ONLY CPD ACADEMY",
+        "routeSegments": [],
+        "matchingTextTokens": [
+          "invite",
+          "only",
+          "cpd",
+          "academy"
+        ]
+      },
+      "id": "readability-6ed8fdc1cc56",
+      "suspectedSourceFiles": [
+        "src/pages/LandingPage.tsx",
+        "src/components/layout/AppLayout.tsx",
+        "src/pages/admin/AdminUsersPage.tsx",
+        "src/pages/SignInPage.tsx",
+        "src/pages/admin/AdminCourseDraftsPage.tsx"
+      ]
+    },
+    {
+      "type": "readability",
+      "severity": "high",
+      "route": "/",
+      "viewport": "mobile",
+      "selector": "body:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(1) > section:nth-of-type(1) > div:nth-of-type(1) > p:nth-of-type(1)",
+      "description": "Text appears too small for comfortable reading at 11.52px.",
+      "evidence": {
+        "screenshot": "C:\\Users\\AlexMcAulay\\OneDrive - Treewalk Ventures Inc\\Documents\\Github\\Academy\\treewalkacademy-\\app\\.betterbrowse\\screenshots\\20260415T212422Z\\root--mobile.png"
+      },
+      "recommendedFix": "Increase font size to at least 12px (and usually 14px+ for body text), especially on mobile viewports.",
+      "confidence": 0.79,
+      "metadata": {
+        "tagName": "p",
+        "classList": [
+          "section-eyebrow"
+        ],
+        "elementText": "ENTRY",
+        "routeSegments": [],
+        "matchingTextTokens": [
+          "entry"
+        ]
+      },
+      "id": "readability-daa352f24d97",
+      "suspectedSourceFiles": [
+        "src/pages/admin/AdminCourseCreatePage.tsx",
+        "src/pages/admin/AdminCourseQuizBankPage.tsx",
+        "src/pages/LandingPage.tsx",
+        "src/pages/learner/HomePage.tsx",
+        "src/pages/learner/MyLearningExportPage.tsx"
+      ]
+    },
+    {
+      "type": "readability",
+      "severity": "medium",
+      "route": "/",
+      "viewport": "desktop",
+      "selector": "body:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(1) > div:nth-of-type(1) > p:nth-of-type(1)",
+      "description": "Text appears too small for comfortable reading at 11.52px.",
+      "evidence": {
+        "screenshot": "C:\\Users\\AlexMcAulay\\OneDrive - Treewalk Ventures Inc\\Documents\\Github\\Academy\\treewalkacademy-\\app\\.betterbrowse\\screenshots\\20260415T212422Z\\root--desktop.png"
+      },
+      "recommendedFix": "Increase font size to at least 12px (and usually 14px+ for body text), especially on mobile viewports.",
+      "confidence": 0.79,
+      "metadata": {
+        "tagName": "p",
+        "classList": [
+          "section-eyebrow"
+        ],
+        "elementText": "INVITE-ONLY CPD ACADEMY",
+        "routeSegments": [],
+        "matchingTextTokens": [
+          "invite",
+          "only",
+          "cpd",
+          "academy"
+        ]
+      },
+      "id": "readability-9ae5ebc5df35",
+      "suspectedSourceFiles": [
+        "src/pages/LandingPage.tsx",
+        "src/components/layout/AppLayout.tsx",
+        "src/pages/admin/AdminUsersPage.tsx",
+        "src/pages/SignInPage.tsx",
+        "src/pages/admin/AdminCourseDraftsPage.tsx"
+      ]
+    },
+    {
+      "type": "readability",
+      "severity": "medium",
+      "route": "/",
+      "viewport": "desktop",
+      "selector": "body:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(1) > section:nth-of-type(1) > div:nth-of-type(1) > p:nth-of-type(1)",
+      "description": "Text appears too small for comfortable reading at 11.52px.",
+      "evidence": {
+        "screenshot": "C:\\Users\\AlexMcAulay\\OneDrive - Treewalk Ventures Inc\\Documents\\Github\\Academy\\treewalkacademy-\\app\\.betterbrowse\\screenshots\\20260415T212422Z\\root--desktop.png"
+      },
+      "recommendedFix": "Increase font size to at least 12px (and usually 14px+ for body text), especially on mobile viewports.",
+      "confidence": 0.79,
+      "metadata": {
+        "tagName": "p",
+        "classList": [
+          "section-eyebrow"
+        ],
+        "elementText": "ENTRY",
+        "routeSegments": [],
+        "matchingTextTokens": [
+          "entry"
+        ]
+      },
+      "id": "readability-eff13cbe5021",
+      "suspectedSourceFiles": [
+        "src/pages/admin/AdminCourseCreatePage.tsx",
+        "src/pages/admin/AdminCourseQuizBankPage.tsx",
+        "src/pages/LandingPage.tsx",
+        "src/pages/learner/HomePage.tsx",
+        "src/pages/learner/MyLearningExportPage.tsx"
+      ]
+    }
+  ]
+}

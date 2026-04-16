@@ -1,0 +1,31 @@
+{
+  "engine": "playwright",
+  "framework": "unknown",
+  "baseUrl": "http://127.0.0.1:5173",
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1440,
+      "height": 1024
+    },
+    {
+      "name": "mobile",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "routes": [
+    "/"
+  ],
+  "routesFile": ".betterbrowse/routes.json",
+  "writeMode": "diff-only",
+  "styleSystem": {
+    "type": "unknown",
+    "entryPoints": []
+  },
+  "sourceMap": {
+    "componentRoots": [
+      "app"
+    ]
+  }
+}

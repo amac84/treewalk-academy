@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "createdAt": "2026-04-15T20:59:48.307Z",
+  "addedScripts": [
+    "betterbrowse:audit",
+    "betterbrowse:fix",
+    "betterbrowse:doctor",
+    "betterbrowse:uninstall"
+  ]
+}

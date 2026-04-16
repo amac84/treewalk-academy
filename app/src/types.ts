@@ -292,6 +292,24 @@ export interface LiveOccurrenceAttendance {
     | 'manual_marked'
 }
 
+export type LiveChatMessageKind = 'question' | 'chat'
+export type LiveChatClassificationSource = 'auto' | 'user_override'
+export type LiveChatConnectionStatus = 'idle' | 'loading' | 'ready' | 'error'
+
+export interface LiveChatMessage {
+  id: string
+  occurrenceId: string
+  userId: string
+  userNameSnapshot: string
+  body: string
+  messageKind: LiveChatMessageKind
+  classificationSource: LiveChatClassificationSource
+  questionScore: number
+  isDeleted: boolean
+  createdAt: string
+  updatedAt: string
+}
+
 export interface LiveRehearsalStream {
   id: string
   title: string

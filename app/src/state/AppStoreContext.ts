@@ -10,6 +10,9 @@ import type {
   CourseTopic,
   Enrollment,
   Invite,
+  LiveChatConnectionStatus,
+  LiveChatMessage,
+  LiveChatMessageKind,
   QuizPolicy,
   QuizQuestion,
   QuizAttempt,
@@ -168,6 +171,21 @@ export interface AppStoreContextValue extends AppState {
     progress: VideoTranscriptionProgress | null,
   ) => void
   clearVideoProcessingProgress: (courseId: string) => void
+  liveChatMessagesByOccurrence: Record<string, LiveChatMessage[]>
+  liveChatStatusByOccurrence: Record<string, LiveChatConnectionStatus>
+  liveChatErrorByOccurrence: Record<string, string | undefined>
+  sendLiveChatMessage: (
+    occurrenceId: string,
+    body: string,
+    forceKind?: LiveChatMessageKind,
+  ) => Promise<ActionResult>
+  subscribeToLiveChat: (occurrenceId: string) => void
+  unsubscribeFromLiveChat: (occurrenceId: string) => void
+  retryLiveChatSubscription: (occurrenceId: string) => void
+  reclassifyOwnLiveChatMessage: (
+    messageId: string,
+    nextKind: LiveChatMessageKind,
+  ) => Promise<ActionResult>
 }
 
 export const AppStoreContext = createContext<AppStoreContextValue | undefined>(undefined)

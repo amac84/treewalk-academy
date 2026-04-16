@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 import {
   LIVE_ATTENDANCE_HEARTBEAT_MAX_DELTA_SECONDS,
   LIVE_ATTENDANCE_REQUIRED_WATCH_RATIO,
@@ -32,7 +33,24 @@ import {
   isMuxFunctionConfigured,
   muxDurationSecondsToMinutes,
 } from '../lib/muxEdge'
-import { getSupabaseBrowserClient, hasSupabaseBrowserEnv } from '../lib/supabaseClient'
+import {
+  describeSupabaseTransportFailure,
+  getSupabaseBrowserClient,
+  hasSupabaseBrowserEnv,
+} from '../lib/supabaseClient'
+import {
+  buildLiveChatInsertRow,
+  buildLiveChatReclassifyPatch,
+  canReclassifyLiveChatMessage,
+  findLiveChatMessage,
+  LIVE_CHAT_TABLE,
+  removeLiveChatMessageFromMap,
+  replaceLiveChatMessageMapForOccurrence,
+  toLiveChatMessage,
+  type LiveChatMessageRow,
+  upsertLiveChatMessageMap,
+  validateLiveChatBody,
+} from '../lib/liveChatState'
 import { syncSupabaseSessionForAuthorRole } from '../lib/supabaseMuxSession'
 import { accessScopeFromEmail } from '../lib/treewalkEmail'
 import {
@@ -53,6 +71,9 @@ import type {
   Enrollment,
   Invite,
   LearningActivityEvent,
+  LiveChatConnectionStatus,
+  LiveChatMessage,
+  LiveChatMessageKind,
   QuizPolicy,
   QuizQuestion,
   VideoWatchProgress,
@@ -81,6 +102,37 @@ const createCode = () =>
 
 const createId = (prefix: string) =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+const emptyLiveChatStatus: LiveChatConnectionStatus = 'idle'
+
+function normalizeLiveChatRows(rows: unknown): LiveChatMessage[] {
+  if (!Array.isArray(rows)) return []
+  const out: LiveChatMessage[] = []
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue
+    const typed = row as Record<string, unknown>
+    if (typed.id == null || typed.occurrence_id == null || typed.user_id == null) continue
+    out.push(
+      toLiveChatMessage({
+        id: String(typed.id),
+        occurrence_id: String(typed.occurrence_id),
+        user_id: String(typed.user_id),
+        user_name_snapshot: String(typed.user_name_snapshot ?? ''),
+        body: String(typed.body ?? ''),
+        message_kind: typed.message_kind === 'question' ? 'question' : 'chat',
+        classification_source: typed.classification_source === 'user_override' ? 'user_override' : 'auto',
+        question_score:
+          typeof typed.question_score === 'number' && Number.isFinite(typed.question_score)
+            ? typed.question_score
+            : 0,
+        is_deleted: Boolean(typed.is_deleted),
+        created_at: String(typed.created_at ?? new Date().toISOString()),
+        updated_at: String(typed.updated_at ?? typed.created_at ?? new Date().toISOString()),
+      }),
+    )
+  }
+  return out
+}
 
 function sanitizeLiveDataForRuntime(state: AppState): Pick<AppState, 'liveOccurrences' | 'liveRehearsal'> {
   return {
@@ -251,6 +303,7 @@ const MAX_HEARTBEAT_DELTA_SECONDS = 12
 const MAX_POSITION_ADVANCE_SECONDS = 20
 const COURSE_PACKAGE_SCHEMA_VERSION = 1
 const DEFAULT_EXPORT_LOCALE = 'en-US'
+const LIVE_CHAT_SEND_COOLDOWN_MS = 1200
 
 const ensureEnrollmentVideoProgress = (
   enrollment: Enrollment,
@@ -337,6 +390,19 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
     getSupabaseBrowserClient() ? 'loading' : 'local_only',
   )
   const [coursesSyncMessage, setCoursesSyncMessage] = useState<string | null>(null)
+  const [liveChatMessagesByOccurrence, setLiveChatMessagesByOccurrence] = useState<
+    Record<string, LiveChatMessage[]>
+  >({})
+  const [liveChatStatusByOccurrence, setLiveChatStatusByOccurrence] = useState<
+    Record<string, LiveChatConnectionStatus>
+  >({})
+  const [liveChatErrorByOccurrence, setLiveChatErrorByOccurrence] = useState<
+    Record<string, string | undefined>
+  >({})
+  const liveChatChannelsRef = useRef<Record<string, RealtimeChannel>>({})
+  const liveChatSubscribedRef = useRef<Record<string, boolean>>({})
+  const liveChatSendInFlightRef = useRef<Record<string, boolean>>({})
+  const liveChatLastSentAtRef = useRef<Record<string, number>>({})
 
   const clearCoursesSyncMessage = useCallback(() => setCoursesSyncMessage(null), [])
 
@@ -396,6 +462,168 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       delete rest[key]
       return rest
     })
+  }, [])
+
+  const releaseLiveChatChannel = useCallback(
+    (
+      occurrenceId: string,
+      options?: {
+        resetStatus?: boolean
+        clearError?: boolean
+      },
+    ) => {
+      if (!occurrenceId) return
+      const channel = liveChatChannelsRef.current[occurrenceId]
+      delete liveChatChannelsRef.current[occurrenceId]
+      delete liveChatSubscribedRef.current[occurrenceId]
+      delete liveChatSendInFlightRef.current[occurrenceId]
+      if (channel) {
+        const sb = getSupabaseBrowserClient()
+        if (sb) {
+          void sb.removeChannel(channel)
+        } else {
+          void channel.unsubscribe()
+        }
+      }
+      if (options?.resetStatus) {
+        setLiveChatStatusByOccurrence((prev) => ({ ...prev, [occurrenceId]: emptyLiveChatStatus }))
+      }
+      if (options?.clearError) {
+        setLiveChatErrorByOccurrence((prev) => ({ ...prev, [occurrenceId]: undefined }))
+      }
+    },
+    [],
+  )
+
+  const unsubscribeFromLiveChat = useCallback((occurrenceId: string) => {
+    if (!occurrenceId) return
+    releaseLiveChatChannel(occurrenceId, { resetStatus: true, clearError: true })
+  }, [releaseLiveChatChannel])
+
+  const subscribeToLiveChat = useCallback((occurrenceId: string) => {
+    if (!occurrenceId) return
+    if (liveChatSubscribedRef.current[occurrenceId]) return
+    const sb = getSupabaseBrowserClient()
+    if (!sb) {
+      setLiveChatStatusByOccurrence((prev) => ({ ...prev, [occurrenceId]: 'error' }))
+      setLiveChatErrorByOccurrence((prev) => ({
+        ...prev,
+        [occurrenceId]: 'Live chat is unavailable because Supabase is not configured in this browser.',
+      }))
+      return
+    }
+
+    liveChatSubscribedRef.current[occurrenceId] = true
+    setLiveChatStatusByOccurrence((prev) => ({ ...prev, [occurrenceId]: 'loading' }))
+    setLiveChatErrorByOccurrence((prev) => ({ ...prev, [occurrenceId]: undefined }))
+
+    void (async () => {
+      try {
+        const { data, error } = await sb
+          .from(LIVE_CHAT_TABLE)
+          .select('*')
+          .eq('occurrence_id', occurrenceId)
+          .eq('is_deleted', false)
+          .order('created_at', { ascending: true })
+          .limit(500)
+        if (!liveChatSubscribedRef.current[occurrenceId]) return
+        if (error) {
+          throw error
+        }
+        const normalized = normalizeLiveChatRows(data)
+        setLiveChatMessagesByOccurrence((prev) =>
+          replaceLiveChatMessageMapForOccurrence(prev, occurrenceId, normalized),
+        )
+      } catch (error) {
+        if (!liveChatSubscribedRef.current[occurrenceId]) return
+        setLiveChatStatusByOccurrence((prev) => ({ ...prev, [occurrenceId]: 'error' }))
+        setLiveChatErrorByOccurrence((prev) => ({
+          ...prev,
+          [occurrenceId]: describeSupabaseTransportFailure('loading live chat', error),
+        }))
+      }
+
+      if (!liveChatSubscribedRef.current[occurrenceId]) return
+
+      const channel = sb.channel(`live_chat:${occurrenceId}`)
+      channel.on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: LIVE_CHAT_TABLE,
+          filter: `occurrence_id=eq.${occurrenceId}`,
+        },
+        (payload) => {
+          if (payload.eventType === 'DELETE') {
+            const oldRow = payload.old as Partial<LiveChatMessageRow> | null
+            const oldMessageId = typeof oldRow?.id === 'string' ? oldRow.id : ''
+            const oldOccurrenceId =
+              typeof oldRow?.occurrence_id === 'string' ? oldRow.occurrence_id : occurrenceId
+            if (oldMessageId) {
+              setLiveChatMessagesByOccurrence((prev) =>
+                removeLiveChatMessageFromMap(prev, oldOccurrenceId, oldMessageId),
+              )
+            }
+            return
+          }
+
+          const parsed = normalizeLiveChatRows([payload.new])
+          const incoming = parsed[0]
+          if (!incoming) return
+          if (incoming.isDeleted) {
+            setLiveChatMessagesByOccurrence((prev) =>
+              removeLiveChatMessageFromMap(prev, incoming.occurrenceId, incoming.id),
+            )
+            return
+          }
+          setLiveChatMessagesByOccurrence((prev) => upsertLiveChatMessageMap(prev, incoming))
+        },
+      )
+
+      liveChatChannelsRef.current[occurrenceId] = channel
+      channel.subscribe((status) => {
+        if (!liveChatSubscribedRef.current[occurrenceId]) return
+        if (status === 'SUBSCRIBED') {
+          setLiveChatStatusByOccurrence((prev) => ({ ...prev, [occurrenceId]: 'ready' }))
+          setLiveChatErrorByOccurrence((prev) => ({ ...prev, [occurrenceId]: undefined }))
+          return
+        }
+        if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR' || status === 'CLOSED') {
+          releaseLiveChatChannel(occurrenceId, { resetStatus: false, clearError: false })
+          setLiveChatStatusByOccurrence((prev) => ({ ...prev, [occurrenceId]: 'error' }))
+          setLiveChatErrorByOccurrence((prev) => ({
+            ...prev,
+            [occurrenceId]: 'Live chat connection was interrupted. Use Retry chat connection.',
+          }))
+        }
+      })
+    })()
+  }, [releaseLiveChatChannel])
+
+  const retryLiveChatSubscription = useCallback((occurrenceId: string) => {
+    if (!occurrenceId) return
+    releaseLiveChatChannel(occurrenceId, { resetStatus: false, clearError: true })
+    subscribeToLiveChat(occurrenceId)
+  }, [releaseLiveChatChannel, subscribeToLiveChat])
+
+  useEffect(() => {
+    return () => {
+      const channels = Object.values(liveChatChannelsRef.current)
+      liveChatChannelsRef.current = {}
+      liveChatSubscribedRef.current = {}
+      liveChatSendInFlightRef.current = {}
+      liveChatLastSentAtRef.current = {}
+      if (channels.length === 0) return
+      const sb = getSupabaseBrowserClient()
+      for (const channel of channels) {
+        if (sb) {
+          void sb.removeChannel(channel)
+        } else {
+          void channel.unsubscribe()
+        }
+      }
+    }
   }, [])
 
   useEffect(() => {
@@ -483,6 +711,141 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
     [state.users, currentUserId],
   )
   const currentUserRole = currentUser?.role ?? null
+
+  const sendLiveChatMessage = useCallback(
+    async (
+      occurrenceId: string,
+      body: string,
+      forceKind?: LiveChatMessageKind,
+    ): Promise<ActionResult> => {
+      if (!currentUser) return { ok: false, message: 'Please sign in.' }
+      const validated = validateLiveChatBody(body)
+      if (!validated.ok) {
+        setLiveChatErrorByOccurrence((prev) => ({ ...prev, [occurrenceId]: validated.message }))
+        return { ok: false, message: validated.message }
+      }
+      const sb = getSupabaseBrowserClient()
+      if (!sb) {
+        const message = 'Live chat is unavailable because Supabase is not configured in this browser.'
+        setLiveChatErrorByOccurrence((prev) => ({ ...prev, [occurrenceId]: message }))
+        return {
+          ok: false,
+          message,
+        }
+      }
+
+      if (liveChatSendInFlightRef.current[occurrenceId]) {
+        return { ok: false, message: 'A message is already being sent. Please wait a moment.' }
+      }
+      const cooldownKey = `${occurrenceId}:${currentUser.id}`
+      const now = Date.now()
+      const lastSentAt = liveChatLastSentAtRef.current[cooldownKey] ?? 0
+      if (now - lastSentAt < LIVE_CHAT_SEND_COOLDOWN_MS) {
+        const waitSeconds = ((LIVE_CHAT_SEND_COOLDOWN_MS - (now - lastSentAt)) / 1000).toFixed(1)
+        const message = `Please wait ${waitSeconds}s before sending another message.`
+        setLiveChatErrorByOccurrence((prev) => ({ ...prev, [occurrenceId]: message }))
+        return { ok: false, message }
+      }
+
+      const draft = buildLiveChatInsertRow({
+        id: createId('chat'),
+        occurrenceId,
+        userId: currentUser.id,
+        userNameSnapshot: currentUser.name.trim() || currentUser.email.trim() || 'Learner',
+        body: validated.value,
+        forceKind,
+      })
+
+      liveChatSendInFlightRef.current[occurrenceId] = true
+      try {
+        const { data, error } = await sb.from(LIVE_CHAT_TABLE).insert(draft).select('*').single()
+        if (error) {
+          const message = describeSupabaseTransportFailure('sending chat message', error)
+          setLiveChatErrorByOccurrence((prev) => ({ ...prev, [occurrenceId]: message }))
+          return { ok: false, message }
+        }
+        const normalized = normalizeLiveChatRows(data ? [data] : [draft])
+        const inserted = normalized[0]
+        if (inserted && !inserted.isDeleted) {
+          setLiveChatMessagesByOccurrence((prev) => upsertLiveChatMessageMap(prev, inserted))
+        }
+        liveChatLastSentAtRef.current[cooldownKey] = Date.now()
+        setLiveChatErrorByOccurrence((prev) => ({ ...prev, [occurrenceId]: undefined }))
+        return { ok: true }
+      } catch (error) {
+        const message = describeSupabaseTransportFailure('sending chat message', error)
+        setLiveChatErrorByOccurrence((prev) => ({ ...prev, [occurrenceId]: message }))
+        return { ok: false, message }
+      } finally {
+        delete liveChatSendInFlightRef.current[occurrenceId]
+      }
+    },
+    [currentUser],
+  )
+
+  const reclassifyOwnLiveChatMessage = useCallback(
+    async (messageId: string, nextKind: LiveChatMessageKind): Promise<ActionResult> => {
+      if (!currentUser) return { ok: false, message: 'Please sign in.' }
+      const located = findLiveChatMessage(liveChatMessagesByOccurrence, messageId)
+      if (!located) {
+        return { ok: false, message: 'Message not found.' }
+      }
+      if (!canReclassifyLiveChatMessage(located.message, currentUser.id)) {
+        return { ok: false, message: 'You can only edit your own messages.' }
+      }
+      if (located.message.messageKind === nextKind) {
+        return { ok: true }
+      }
+
+      const sb = getSupabaseBrowserClient()
+      if (!sb) {
+        return {
+          ok: false,
+          message: 'Live chat is unavailable because Supabase is not configured in this browser.',
+        }
+      }
+
+      const patch = buildLiveChatReclassifyPatch(nextKind)
+      try {
+        const { data, error } = await sb
+          .from(LIVE_CHAT_TABLE)
+          .update(patch)
+          .eq('id', messageId)
+          .eq('user_id', currentUser.id)
+          .select('*')
+          .maybeSingle()
+        if (error) {
+          return {
+            ok: false,
+            message: describeSupabaseTransportFailure('updating chat message classification', error),
+          }
+        }
+        if (!data) {
+          return { ok: false, message: 'Message could not be updated.' }
+        }
+        const normalized = normalizeLiveChatRows([data])[0]
+        if (normalized) {
+          setLiveChatMessagesByOccurrence((prev) => upsertLiveChatMessageMap(prev, normalized))
+          setLiveChatErrorByOccurrence((prev) => ({
+            ...prev,
+            [located.occurrenceId]: undefined,
+          }))
+        }
+        return { ok: true }
+      } catch (error) {
+        const message = describeSupabaseTransportFailure(
+          'updating chat message classification',
+          error,
+        )
+        setLiveChatErrorByOccurrence((prev) => ({
+          ...prev,
+          [located.occurrenceId]: message,
+        }))
+        return { ok: false, message }
+      }
+    },
+    [currentUser, liveChatMessagesByOccurrence],
+  )
 
   const syncAuthUser = useCallback((user: User | null) => {
     if (!user) {
@@ -2049,6 +2412,14 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       setVideoUploadProgress,
       setVideoTranscriptionProgress,
       clearVideoProcessingProgress,
+      liveChatMessagesByOccurrence,
+      liveChatStatusByOccurrence,
+      liveChatErrorByOccurrence,
+      sendLiveChatMessage,
+      subscribeToLiveChat,
+      unsubscribeFromLiveChat,
+      retryLiveChatSubscription,
+      reclassifyOwnLiveChatMessage,
     }),
     [
       state,
@@ -2092,6 +2463,14 @@ export const AppStoreProvider = ({ children }: { children: ReactNode }) => {
       setVideoUploadProgress,
       setVideoTranscriptionProgress,
       clearVideoProcessingProgress,
+      liveChatMessagesByOccurrence,
+      liveChatStatusByOccurrence,
+      liveChatErrorByOccurrence,
+      sendLiveChatMessage,
+      subscribeToLiveChat,
+      unsubscribeFromLiveChat,
+      retryLiveChatSubscription,
+      reclassifyOwnLiveChatMessage,
     ],
   )
 
